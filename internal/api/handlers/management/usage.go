@@ -43,7 +43,6 @@ func (h *Handler) GetUsageStatistics(c *gin.Context) {
 	page, pageSize := parseUsagePagination(c)
 	requests := flattenUsageRequestDetails(snapshot)
 	pagedRequests, total, totalPages := paginateUsageRequestEntries(requests, page, pageSize)
-	stripUsageSnapshotDetails(&snapshot)
 
 	c.JSON(http.StatusOK, gin.H{
 		"usage":           snapshot,

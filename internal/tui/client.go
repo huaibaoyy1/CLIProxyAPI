@@ -140,9 +140,28 @@ func (c *Client) PutConfigYAML(yamlContent string) error {
 	return err
 }
 
-// GetUsage fetches usage statistics.
+// GetUsage fetches usage statistics using the default server pagination.
 func (c *Client) GetUsage() (map[string]any, error) {
 	return c.getJSON("/v0/management/usage")
+}
+
+// GetUsagePage fetches usage statistics with explicit pagination parameters.
+func (c *Client) GetUsagePage(page int, pageSize int) (map[string]any, error) {
+	query := url.Values{}
+	if page > 0 {
+		query.Set("page", strconv.Itoa(page))
+	}
+	if pageSize > 0 {
+		query.Set("page_size", strconv.Itoa(pageSize))
+	}
+
+	path := "/v0/management/usage"
+	encodedQuery := query.Encode()
+	if encodedQuery != "" {
+		path += "?" + encodedQuery
+	}
+
+	return c.getJSON(path)
 }
 
 // GetAuthFiles lists auth credential files.
