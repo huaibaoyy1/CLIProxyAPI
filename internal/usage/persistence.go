@@ -14,6 +14,7 @@ import (
 
 const (
 	usagePersistDebounce = 2 * time.Second
+	usagePersistInterval = 30 * time.Second
 	usagePersistTimeout  = 10 * time.Second
 )
 
@@ -25,9 +26,11 @@ type usageSnapshotStore interface {
 type snapshotPersistenceController struct {
 	store usageSnapshotStore
 
-	mu     sync.Mutex
-	timer  *time.Timer
-	closed bool
+	mu      sync.Mutex
+	timer   *time.Timer
+	closed  bool
+	stopCh  chan struct{}
+	started sync.Once
 }
 
 type persistencePlugin struct {
@@ -59,7 +62,11 @@ func EnablePersistence(store usageSnapshotStore) error {
 		return err
 	}
 
-	controller := &snapshotPersistenceController{store: store}
+	controller := &snapshotPersistenceController{
+		store:  store,
+		stopCh: make(chan struct{}),
+	}
+	controller.Start()
 	coreusage.RegisterPlugin(&persistencePlugin{controller: controller})
 
 	persistenceMu.Lock()
@@ -163,6 +170,16 @@ func (p *persistencePlugin) HandleUsage(_ context.Context, _ coreusage.Record) {
 	p.controller.SchedulePersist()
 }
 
+func (c *snapshotPersistenceController) Start() {
+	if c == nil {
+		return
+	}
+
+	c.started.Do(func() {
+		go c.runPeriodicPersist()
+	})
+}
+
 func (c *snapshotPersistenceController) SchedulePersist() {
 	if c == nil {
 		return
@@ -182,6 +199,24 @@ func (c *snapshotPersistenceController) SchedulePersist() {
 	c.timer = time.AfterFunc(usagePersistDebounce, func() {
 		c.persistNow()
 	})
+}
+
+func (c *snapshotPersistenceController) runPeriodicPersist() {
+	if c == nil {
+		return
+	}
+
+	ticker := time.NewTicker(usagePersistInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.persistNow()
+		case <-c.stopCh:
+			return
+		}
+	}
 }
 
 func (c *snapshotPersistenceController) persistNow() {
@@ -209,7 +244,12 @@ func (c *snapshotPersistenceController) Close() {
 		c.timer.Stop()
 		c.timer = nil
 	}
+	stopCh := c.stopCh
 	c.mu.Unlock()
+
+	if stopCh != nil {
+		close(stopCh)
+	}
 
 	c.persistNow()
 }

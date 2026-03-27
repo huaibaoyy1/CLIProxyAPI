@@ -422,10 +422,23 @@ func main() {
 		if usePostgresStore && pgStoreInst != nil {
 			if errEnableUsagePersistence := usage.EnablePersistence(pgStoreInst); errEnableUsagePersistence != nil {
 				log.Errorf("failed to enable PostgreSQL-backed usage statistics persistence: %v", errEnableUsagePersistence)
+			} else {
+				usageTable := "usage_store"
+				if strings.TrimSpace(pgStoreInst.ConfigPath()) != "" {
+					// keep existing config path check nearby for easier troubleshooting context
+				}
+				if strings.TrimSpace(pgStoreSchema) != "" {
+					log.Infof("usage statistics persistence is active: PostgreSQL schema=%s table=%s", pgStoreSchema, usageTable)
+				} else {
+					log.Infof("usage statistics persistence is active: PostgreSQL table=%s", usageTable)
+				}
 			}
 		} else {
+			log.Warn("usage statistics persistence is NOT active: usage-statistics-enabled=true but PostgreSQL store is not configured; set PGSTORE_DSN to enable persistent usage statistics across restarts")
 			usage.WarnPersistenceUnavailable()
 		}
+	} else {
+		log.Info("usage statistics recording is disabled by configuration (usage-statistics-enabled=false)")
 	}
 	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
 
