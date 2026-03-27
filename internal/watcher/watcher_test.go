@@ -543,6 +543,88 @@ func TestAuthSliceToMap(t *testing.T) {
 	}
 }
 
+func TestAddOrUpdateClientThenRemoveDispatchesDeleteForSynthesizedAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	authFile := filepath.Join(tmpDir, "sample.json")
+	if err := os.WriteFile(authFile, []byte(`{"type":"codex","email":"u@example.com"}`), 0o644); err != nil {
+		t.Fatalf("failed to create auth file: %v", err)
+	}
+
+	queue := make(chan AuthUpdate, 8)
+	w := &Watcher{
+		authDir:          tmpDir,
+		lastAuthHashes:   make(map[string]string),
+		lastAuthContents: make(map[string]*coreauth.Auth),
+		fileAuthsByPath:  make(map[string]map[string]*coreauth.Auth),
+	}
+	w.SetConfig(&config.Config{AuthDir: tmpDir})
+	w.SetAuthUpdateQueue(queue)
+	defer w.stopDispatch()
+
+	w.addOrUpdateClient(authFile)
+
+	var added AuthUpdate
+	select {
+	case added = <-queue:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for add update")
+	}
+	if added.Action != AuthUpdateActionAdd {
+		t.Fatalf("expected add update, got %+v", added)
+	}
+	if added.Auth == nil {
+		t.Fatal("expected add update to include auth payload")
+	}
+
+	w.removeClient(authFile)
+
+	select {
+	case deleted := <-queue:
+		if deleted.Action != AuthUpdateActionDelete {
+			t.Fatalf("expected delete update after remove, got %+v", deleted)
+		}
+		if deleted.ID != added.ID {
+			t.Fatalf("expected delete for auth id %q, got %q", added.ID, deleted.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for delete update")
+	}
+}
+
+func TestReloadClientsCachesSynthesizedAuthDetailsForDeletion(t *testing.T) {
+	tmpDir := t.TempDir()
+	authFile := filepath.Join(tmpDir, "sample.json")
+	if err := os.WriteFile(authFile, []byte(`{"type":"codex","email":"u@example.com"}`), 0o644); err != nil {
+		t.Fatalf("failed to create auth file: %v", err)
+	}
+
+	w := &Watcher{
+		authDir: tmpDir,
+		config:  &config.Config{AuthDir: tmpDir},
+	}
+
+	w.reloadClients(true, nil, false)
+
+	normalized := w.normalizeAuthPath(authFile)
+	w.clientsMutex.RLock()
+	defer w.clientsMutex.RUnlock()
+	pathAuths := w.fileAuthsByPath[normalized]
+	if len(pathAuths) != 1 {
+		t.Fatalf("expected one cached synthesized auth for path, got %d", len(pathAuths))
+	}
+	for id, auth := range pathAuths {
+		if strings.TrimSpace(id) == "" {
+			t.Fatal("expected cached auth id to be populated")
+		}
+		if auth == nil {
+			t.Fatal("expected cached auth details to be preserved, got nil")
+		}
+		if auth.ID != id {
+			t.Fatalf("expected cached auth ID %q to match map key %q", auth.ID, id)
+		}
+	}
+}
+
 func TestTriggerServerUpdateCancelsPendingTimerOnImmediate(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{AuthDir: tmpDir}

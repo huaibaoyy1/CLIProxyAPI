@@ -261,30 +261,15 @@ func (m usageTabModel) renderContent() string {
 
 // renderTokenBreakdown aggregates input/output/cached/reasoning tokens from model details.
 func (m usageTabModel) renderTokenBreakdown(modelStats map[string]any) string {
-	details, ok := modelStats["details"]
-	if !ok {
-		return ""
-	}
-	detailList, ok := details.([]any)
-	if !ok || len(detailList) == 0 {
+	tokenStats, ok := modelStats["token_stats"].(map[string]any)
+	if !ok || len(tokenStats) == 0 {
 		return ""
 	}
 
-	var inputTotal, outputTotal, cachedTotal, reasoningTotal int64
-	for _, d := range detailList {
-		dm, ok := d.(map[string]any)
-		if !ok {
-			continue
-		}
-		tokens, ok := dm["tokens"].(map[string]any)
-		if !ok {
-			continue
-		}
-		inputTotal += int64(getFloat(tokens, "input_tokens"))
-		outputTotal += int64(getFloat(tokens, "output_tokens"))
-		cachedTotal += int64(getFloat(tokens, "cached_tokens"))
-		reasoningTotal += int64(getFloat(tokens, "reasoning_tokens"))
-	}
+	inputTotal := int64(getFloat(tokenStats, "input_tokens"))
+	outputTotal := int64(getFloat(tokenStats, "output_tokens"))
+	cachedTotal := int64(getFloat(tokenStats, "cached_tokens"))
+	reasoningTotal := int64(getFloat(tokenStats, "reasoning_tokens"))
 
 	if inputTotal == 0 && outputTotal == 0 && cachedTotal == 0 && reasoningTotal == 0 {
 		return ""

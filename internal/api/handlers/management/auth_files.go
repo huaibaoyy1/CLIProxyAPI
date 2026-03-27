@@ -258,7 +258,19 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 		nameJ, _ := files[j]["name"].(string)
 		return strings.ToLower(nameI) < strings.ToLower(nameJ)
 	})
-	c.JSON(200, gin.H{"files": files})
+
+	files = filterAuthFileEntries(files, strings.TrimSpace(c.Query("search")))
+
+	page, pageSize := parseAuthFilesPagination(c)
+	pagedFiles, total, totalPages := paginateAuthFileEntries(files, page, pageSize)
+
+	c.JSON(200, gin.H{
+		"files":       pagedFiles,
+		"page":        page,
+		"page_size":   pageSize,
+		"total":       total,
+		"total_pages": totalPages,
+	})
 }
 
 // GetAuthFileModels returns the models supported by a specific auth file
@@ -355,7 +367,127 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
 			files = append(files, fileData)
 		}
 	}
-	c.JSON(200, gin.H{"files": files})
+
+	sort.Slice(files, func(i, j int) bool {
+		nameI, _ := files[i]["name"].(string)
+		nameJ, _ := files[j]["name"].(string)
+		return strings.ToLower(nameI) < strings.ToLower(nameJ)
+	})
+
+	files = filterAuthFileEntries(files, strings.TrimSpace(c.Query("search")))
+
+	page, pageSize := parseAuthFilesPagination(c)
+	pagedFiles, total, totalPages := paginateAuthFileEntries(files, page, pageSize)
+
+	c.JSON(200, gin.H{
+		"files":       pagedFiles,
+		"page":        page,
+		"page_size":   pageSize,
+		"total":       total,
+		"total_pages": totalPages,
+	})
+}
+
+func filterAuthFileEntries(files []gin.H, search string) []gin.H {
+	search = strings.ToLower(strings.TrimSpace(search))
+	if search == "" || len(files) == 0 {
+		return files
+	}
+
+	filtered := make([]gin.H, 0, len(files))
+	for _, file := range files {
+		if authFileEntryMatchesSearch(file, search) {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
+}
+
+func authFileEntryMatchesSearch(file gin.H, search string) bool {
+	if len(file) == 0 || search == "" {
+		return true
+	}
+
+	keys := []string{
+		"name",
+		"email",
+		"type",
+		"provider",
+		"label",
+		"account",
+		"account_type",
+		"id",
+	}
+
+	for _, key := range keys {
+		if raw, ok := file[key]; ok {
+			if strings.Contains(strings.ToLower(fmt.Sprint(raw)), search) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func parseAuthFilesPagination(c *gin.Context) (page int, pageSize int) {
+	page = 1
+	pageSize = 50
+
+	if c == nil {
+		return page, pageSize
+	}
+
+	if rawPage := strings.TrimSpace(c.Query("page")); rawPage != "" {
+		if parsed, err := strconv.Atoi(rawPage); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	if rawPageSize := strings.TrimSpace(c.Query("page_size")); rawPageSize != "" {
+		if parsed, err := strconv.Atoi(rawPageSize); err == nil && parsed > 0 {
+			pageSize = parsed
+		}
+	}
+
+	switch {
+	case pageSize <= 0:
+		pageSize = 50
+	case pageSize > 200:
+		pageSize = 200
+	}
+
+	return page, pageSize
+}
+
+func paginateAuthFileEntries(files []gin.H, page int, pageSize int) ([]gin.H, int, int) {
+	total := len(files)
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+
+	if total == 0 {
+		return []gin.H{}, 0, 0
+	}
+
+	totalPages := (total + pageSize - 1) / pageSize
+	if page > totalPages {
+		return []gin.H{}, total, totalPages
+	}
+
+	start := (page - 1) * pageSize
+	if start >= total {
+		return []gin.H{}, total, totalPages
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
+	return files[start:end], total, totalPages
 }
 
 func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {

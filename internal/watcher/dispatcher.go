@@ -81,9 +81,35 @@ func (w *Watcher) refreshAuthState(force bool) {
 	w.clientsMutex.RLock()
 	cfg := w.config
 	authDir := w.authDir
-	w.clientsMutex.RUnlock()
-	auths := snapshotCoreAuthsFunc(cfg, authDir)
-	w.clientsMutex.Lock()
+
+	var auths []*coreauth.Auth
+	canBuildFromCache := cfg != nil && w.fileAuthsByPath != nil
+
+	if canBuildFromCache {
+		auths = make([]*coreauth.Auth, 0)
+
+		configCtx := &synthesizer.SynthesisContext{
+			Config:      cfg,
+			AuthDir:     authDir,
+			Now:         time.Now(),
+			IDGenerator: synthesizer.NewStableIDGenerator(),
+		}
+		configSynth := synthesizer.NewConfigSynthesizer()
+		if configAuths, err := configSynth.Synthesize(configCtx); err == nil {
+			auths = append(auths, configAuths...)
+		}
+
+		for _, byID := range w.fileAuthsByPath {
+			for _, auth := range byID {
+				if auth != nil {
+					auths = append(auths, auth.Clone())
+				}
+			}
+		}
+	} else {
+		auths = snapshotCoreAuthsFunc(cfg, authDir)
+	}
+
 	if len(w.runtimeAuths) > 0 {
 		for _, a := range w.runtimeAuths {
 			if a != nil {
@@ -91,6 +117,9 @@ func (w *Watcher) refreshAuthState(force bool) {
 			}
 		}
 	}
+	w.clientsMutex.RUnlock()
+
+	w.clientsMutex.Lock()
 	updates := w.prepareAuthUpdatesLocked(auths, force)
 	w.clientsMutex.Unlock()
 	w.dispatchAuthUpdates(updates)

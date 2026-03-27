@@ -84,6 +84,7 @@ type apiStats struct {
 type modelStats struct {
 	TotalRequests int64
 	TotalTokens   int64
+	TokenStats    TokenStats
 	Details       []RequestDetail
 }
 
@@ -132,7 +133,8 @@ type APISnapshot struct {
 type ModelSnapshot struct {
 	TotalRequests int64           `json:"total_requests"`
 	TotalTokens   int64           `json:"total_tokens"`
-	Details       []RequestDetail `json:"details"`
+	TokenStats    TokenStats      `json:"token_stats"`
+	Details       []RequestDetail `json:"details,omitempty"`
 }
 
 var defaultRequestStatistics = NewRequestStatistics()
@@ -222,6 +224,11 @@ func (s *RequestStatistics) updateAPIStats(stats *apiStats, model string, detail
 	}
 	modelStatsValue.TotalRequests++
 	modelStatsValue.TotalTokens += detail.Tokens.TotalTokens
+	modelStatsValue.TokenStats.InputTokens += detail.Tokens.InputTokens
+	modelStatsValue.TokenStats.OutputTokens += detail.Tokens.OutputTokens
+	modelStatsValue.TokenStats.ReasoningTokens += detail.Tokens.ReasoningTokens
+	modelStatsValue.TokenStats.CachedTokens += detail.Tokens.CachedTokens
+	modelStatsValue.TokenStats.TotalTokens += detail.Tokens.TotalTokens
 	modelStatsValue.Details = append(modelStatsValue.Details, detail)
 }
 
@@ -253,6 +260,7 @@ func (s *RequestStatistics) Snapshot() StatisticsSnapshot {
 			apiSnapshot.Models[modelName] = ModelSnapshot{
 				TotalRequests: modelStatsValue.TotalRequests,
 				TotalTokens:   modelStatsValue.TotalTokens,
+				TokenStats:    normaliseTokenStats(modelStatsValue.TokenStats),
 				Details:       requestDetails,
 			}
 		}

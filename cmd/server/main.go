@@ -418,6 +418,15 @@ func main() {
 		}
 	}
 	usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
+	if cfg.UsageStatisticsEnabled {
+		if usePostgresStore && pgStoreInst != nil {
+			if errEnableUsagePersistence := usage.EnablePersistence(pgStoreInst); errEnableUsagePersistence != nil {
+				log.Errorf("failed to enable PostgreSQL-backed usage statistics persistence: %v", errEnableUsagePersistence)
+			}
+		} else {
+			usage.WarnPersistenceUnavailable()
+		}
+	}
 	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
 
 	if err = logging.ConfigureLogOutput(cfg); err != nil {

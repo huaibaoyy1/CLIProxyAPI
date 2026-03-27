@@ -22,7 +22,9 @@ import (
 const (
 	defaultConfigTable = "config_store"
 	defaultAuthTable   = "auth_store"
+	defaultUsageTable  = "usage_store"
 	defaultConfigKey   = "config"
+	defaultUsageKey    = "usage"
 )
 
 // PostgresStoreConfig captures configuration required to initialize a Postgres-backed store.
@@ -31,6 +33,7 @@ type PostgresStoreConfig struct {
 	Schema      string
 	ConfigTable string
 	AuthTable   string
+	UsageTable  string
 	SpoolDir    string
 }
 
@@ -57,6 +60,9 @@ func NewPostgresStore(ctx context.Context, cfg PostgresStoreConfig) (*PostgresSt
 	}
 	if cfg.AuthTable == "" {
 		cfg.AuthTable = defaultAuthTable
+	}
+	if cfg.UsageTable == "" {
+		cfg.UsageTable = defaultUsageTable
 	}
 
 	spoolRoot := strings.TrimSpace(cfg.SpoolDir)
@@ -139,6 +145,17 @@ func (s *PostgresStore) EnsureSchema(ctx context.Context) error {
 		)
 	`, authTable)); err != nil {
 		return fmt.Errorf("postgres store: create auth table: %w", err)
+	}
+	usageTable := s.fullTableName(s.cfg.UsageTable)
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id TEXT PRIMARY KEY,
+			content JSONB NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`, usageTable)); err != nil {
+		return fmt.Errorf("postgres store: create usage table: %w", err)
 	}
 	return nil
 }
@@ -540,6 +557,35 @@ func (s *PostgresStore) deleteConfigRecord(ctx context.Context) error {
 	query := fmt.Sprintf("DELETE FROM %s WHERE id = $1", s.fullTableName(s.cfg.ConfigTable))
 	if _, err := s.db.ExecContext(ctx, query, defaultConfigKey); err != nil {
 		return fmt.Errorf("postgres store: delete config: %w", err)
+	}
+	return nil
+}
+
+// LoadUsageSnapshot loads the persisted usage statistics snapshot from PostgreSQL.
+func (s *PostgresStore) LoadUsageSnapshot(ctx context.Context) ([]byte, error) {
+	query := fmt.Sprintf("SELECT content FROM %s WHERE id = $1", s.fullTableName(s.cfg.UsageTable))
+	var content []byte
+	err := s.db.QueryRowContext(ctx, query, defaultUsageKey).Scan(&content)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("postgres store: load usage snapshot: %w", err)
+	default:
+		return content, nil
+	}
+}
+
+// PersistUsageSnapshot upserts the current usage statistics snapshot into PostgreSQL.
+func (s *PostgresStore) PersistUsageSnapshot(ctx context.Context, content []byte) error {
+	query := fmt.Sprintf(`
+		INSERT INTO %s (id, content, created_at, updated_at)
+		VALUES ($1, $2, NOW(), NOW())
+		ON CONFLICT (id)
+		DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
+	`, s.fullTableName(s.cfg.UsageTable))
+	if _, err := s.db.ExecContext(ctx, query, defaultUsageKey, json.RawMessage(content)); err != nil {
+		return fmt.Errorf("postgres store: persist usage snapshot: %w", err)
 	}
 	return nil
 }

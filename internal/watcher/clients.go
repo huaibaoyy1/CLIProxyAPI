@@ -109,7 +109,7 @@ func (w *Watcher) reloadClients(rescanAuth bool, affectedOAuthProviders []string
 						}
 						if generated := synthesizer.SynthesizeAuthFile(ctx, path, data); len(generated) > 0 {
 							if pathAuths := authSliceToMap(generated); len(pathAuths) > 0 {
-								w.fileAuthsByPath[normalizedPath] = authIDSet(pathAuths)
+								w.fileAuthsByPath[normalizedPath] = cloneAuthMap(pathAuths)
 							}
 						}
 					}
@@ -218,7 +218,7 @@ func (w *Watcher) addOrUpdateClient(path string) {
 	generated := synthesizer.SynthesizeAuthFile(sctx, path, data)
 	newByID := authSliceToMap(generated)
 	if len(newByID) > 0 {
-		w.fileAuthsByPath[normalized] = authIDSet(newByID)
+		w.fileAuthsByPath[normalized] = cloneAuthMap(newByID)
 	} else {
 		delete(w.fileAuthsByPath, normalized)
 	}
@@ -285,12 +285,16 @@ func authSliceToMap(auths []*coreauth.Auth) map[string]*coreauth.Auth {
 	return byID
 }
 
-func authIDSet(auths map[string]*coreauth.Auth) map[string]*coreauth.Auth {
-	set := make(map[string]*coreauth.Auth, len(auths))
-	for id := range auths {
-		set[id] = nil
+func cloneAuthMap(auths map[string]*coreauth.Auth) map[string]*coreauth.Auth {
+	cloned := make(map[string]*coreauth.Auth, len(auths))
+	for id, auth := range auths {
+		if auth == nil {
+			cloned[id] = nil
+			continue
+		}
+		cloned[id] = auth.Clone()
 	}
-	return set
+	return cloned
 }
 
 func (w *Watcher) loadFileClients(cfg *config.Config) int {
