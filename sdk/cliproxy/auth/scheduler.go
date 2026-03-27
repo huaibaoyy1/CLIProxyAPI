@@ -97,6 +97,40 @@ type childBucket struct {
 // cooldownQueue is the blocked auth collection ordered by next retry time during rebuilds.
 type cooldownQueue []*scheduledAuth
 
+func scheduledAuthSelectionSeq(entry *scheduledAuth) uint64 {
+	if entry == nil || entry.auth == nil {
+		return 0
+	}
+	return entry.auth.RoundRobinSelectionSeq()
+}
+
+func scheduledAuthLess(left, right *scheduledAuth) bool {
+	leftSeq := scheduledAuthSelectionSeq(left)
+	rightSeq := scheduledAuthSelectionSeq(right)
+	if leftSeq != rightSeq {
+		return leftSeq < rightSeq
+	}
+	leftID := ""
+	if left != nil && left.auth != nil {
+		leftID = left.auth.ID
+	}
+	rightID := ""
+	if right != nil && right.auth != nil {
+		rightID = right.auth.ID
+	}
+	return leftID < rightID
+}
+
+func latestScheduledAuthSelectionSeq(entries []*scheduledAuth) uint64 {
+	var maxSeq uint64
+	for _, entry := range entries {
+		if seq := scheduledAuthSelectionSeq(entry); seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+	return maxSeq
+}
+
 // newAuthScheduler constructs an empty scheduler configured for the supplied selector strategy.
 func newAuthScheduler(selector Selector) *authScheduler {
 	return &authScheduler{
@@ -772,7 +806,7 @@ func (m *modelScheduler) rebuildIndexesLocked() {
 	}
 	for priority, entries := range priorityBuckets {
 		sort.Slice(entries, func(i, j int) bool {
-			return entries[i].auth.ID < entries[j].auth.ID
+			return scheduledAuthLess(entries[i], entries[j])
 		})
 		m.readyByPriority[priority] = buildReadyBucket(entries)
 		m.priorityOrder = append(m.priorityOrder, priority)
@@ -834,7 +868,16 @@ func buildReadyView(entries []*scheduledAuth) readyView {
 	for parent := range groups {
 		view.parentOrder = append(view.parentOrder, parent)
 	}
-	sort.Strings(view.parentOrder)
+	sort.Slice(view.parentOrder, func(i, j int) bool {
+		leftParent := view.parentOrder[i]
+		rightParent := view.parentOrder[j]
+		leftSeq := latestScheduledAuthSelectionSeq(groups[leftParent])
+		rightSeq := latestScheduledAuthSelectionSeq(groups[rightParent])
+		if leftSeq != rightSeq {
+			return leftSeq < rightSeq
+		}
+		return leftParent < rightParent
+	})
 	for _, parent := range view.parentOrder {
 		view.children[parent] = &childBucket{items: append([]*scheduledAuth(nil), groups[parent]...)}
 	}

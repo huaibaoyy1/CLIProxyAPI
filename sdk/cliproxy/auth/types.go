@@ -29,6 +29,8 @@ type RequestInfo struct {
 
 type requestInfoKey struct{}
 
+const roundRobinSelectionSeqMetadataKey = "cpa_round_robin_selection_seq"
+
 // WithRequestInfo returns a new context with the given RequestInfo attached.
 func WithRequestInfo(ctx context.Context, info *RequestInfo) context.Context {
 	return context.WithValue(ctx, requestInfoKey{}, info)
@@ -362,6 +364,12 @@ func parseIntAny(val any) (int, bool) {
 		return int(typed), true
 	case int64:
 		return int(typed), true
+	case uint:
+		return int(typed), true
+	case uint32:
+		return int(typed), true
+	case uint64:
+		return int(typed), true
 	case float64:
 		return int(typed), true
 	case json.Number:
@@ -383,6 +391,31 @@ func parseIntAny(val any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func (a *Auth) RoundRobinSelectionSeq() uint64 {
+	if a == nil || a.Metadata == nil {
+		return 0
+	}
+	raw, ok := a.Metadata[roundRobinSelectionSeqMetadataKey]
+	if !ok {
+		return 0
+	}
+	parsed, ok := parseIntAny(raw)
+	if !ok || parsed <= 0 {
+		return 0
+	}
+	return uint64(parsed)
+}
+
+func (a *Auth) SetRoundRobinSelectionSeq(seq uint64) {
+	if a == nil || seq == 0 {
+		return
+	}
+	if a.Metadata == nil {
+		a.Metadata = make(map[string]any)
+	}
+	a.Metadata[roundRobinSelectionSeqMetadataKey] = seq
 }
 
 func (a *Auth) AccountInfo() (string, string) {

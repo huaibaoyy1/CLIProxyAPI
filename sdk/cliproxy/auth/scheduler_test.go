@@ -208,6 +208,65 @@ func TestSchedulerPick_CodexWebsocketPrefersWebsocketEnabledSubset(t *testing.T)
 	}
 }
 
+func TestSchedulerPick_RoundRobinResumesFromPersistedSelectionSeq(t *testing.T) {
+	t.Parallel()
+
+	authA := &Auth{ID: "auth-a", Provider: "gemini", Metadata: map[string]any{}}
+	authA.SetRoundRobinSelectionSeq(3)
+	authB := &Auth{ID: "auth-b", Provider: "gemini", Metadata: map[string]any{}}
+	authB.SetRoundRobinSelectionSeq(1)
+	authC := &Auth{ID: "auth-c", Provider: "gemini", Metadata: map[string]any{}}
+	authC.SetRoundRobinSelectionSeq(2)
+
+	scheduler := newSchedulerForTest(&RoundRobinSelector{}, authA, authB, authC)
+
+	want := []string{"auth-b", "auth-c", "auth-a"}
+	for index, wantID := range want {
+		got, errPick := scheduler.pickSingle(context.Background(), "gemini", "", cliproxyexecutor.Options{}, nil)
+		if errPick != nil {
+			t.Fatalf("pickSingle() #%d error = %v", index, errPick)
+		}
+		if got == nil {
+			t.Fatalf("pickSingle() #%d auth = nil", index)
+		}
+		if got.ID != wantID {
+			t.Fatalf("pickSingle() #%d auth.ID = %q, want %q", index, got.ID, wantID)
+		}
+	}
+}
+
+func TestSchedulerPick_GeminiVirtualParentResumesFromPersistedSelectionSeq(t *testing.T) {
+	t.Parallel()
+
+	model := "gemini-2.5-pro"
+	registerSchedulerModels(t, "gemini-cli", model, "cred-a::proj-1", "cred-a::proj-2", "cred-b::proj-1", "cred-b::proj-2")
+
+	a1 := &Auth{ID: "cred-a::proj-1", Provider: "gemini-cli", Attributes: map[string]string{"gemini_virtual_parent": "cred-a"}, Metadata: map[string]any{}}
+	a1.SetRoundRobinSelectionSeq(1)
+	a2 := &Auth{ID: "cred-a::proj-2", Provider: "gemini-cli", Attributes: map[string]string{"gemini_virtual_parent": "cred-a"}, Metadata: map[string]any{}}
+	a2.SetRoundRobinSelectionSeq(3)
+	b1 := &Auth{ID: "cred-b::proj-1", Provider: "gemini-cli", Attributes: map[string]string{"gemini_virtual_parent": "cred-b"}, Metadata: map[string]any{}}
+	b1.SetRoundRobinSelectionSeq(2)
+	b2 := &Auth{ID: "cred-b::proj-2", Provider: "gemini-cli", Attributes: map[string]string{"gemini_virtual_parent": "cred-b"}, Metadata: map[string]any{}}
+	b2.SetRoundRobinSelectionSeq(4)
+
+	scheduler := newSchedulerForTest(&RoundRobinSelector{}, a1, a2, b1, b2)
+
+	want := []string{"cred-a::proj-1", "cred-b::proj-1", "cred-a::proj-2", "cred-b::proj-2"}
+	for index, wantID := range want {
+		got, errPick := scheduler.pickSingle(context.Background(), "gemini-cli", model, cliproxyexecutor.Options{}, nil)
+		if errPick != nil {
+			t.Fatalf("pickSingle() #%d error = %v", index, errPick)
+		}
+		if got == nil {
+			t.Fatalf("pickSingle() #%d auth = nil", index)
+		}
+		if got.ID != wantID {
+			t.Fatalf("pickSingle() #%d auth.ID = %q, want %q", index, got.ID, wantID)
+		}
+	}
+}
+
 func TestSchedulerPick_MixedProvidersUsesProviderRotationOverReadyCandidates(t *testing.T) {
 	t.Parallel()
 

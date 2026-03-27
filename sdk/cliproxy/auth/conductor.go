@@ -153,6 +153,9 @@ type Manager struct {
 	// modelPoolOffsets tracks per-auth alias pool rotation state.
 	modelPoolOffsets map[string]int
 
+	// selectionSeq stores the persisted round-robin selection sequence baseline.
+	selectionSeq atomic.Uint64
+
 	// runtimeConfig stores the latest application config for request-time decisions.
 	// It is initialized in NewManager; never Load() before first Store().
 	runtimeConfig atomic.Value
@@ -210,7 +213,18 @@ func (m *Manager) syncScheduler() {
 	if m == nil || m.scheduler == nil {
 		return
 	}
-	m.syncSchedulerFromSnapshot(m.snapshotAuths())
+	snapshot := m.snapshotAuths()
+	var maxSeq uint64
+	for _, auth := range snapshot {
+		if auth == nil {
+			continue
+		}
+		if seq := auth.RoundRobinSelectionSeq(); seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+	m.selectionSeq.Store(maxSeq)
+	m.syncSchedulerFromSnapshot(snapshot)
 }
 
 // RefreshSchedulerEntry re-upserts a single auth into the scheduler so that its
@@ -1090,6 +1104,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 		entry := logEntryWithRequestID(ctx)
 		debugLogAuthSelection(entry, auth, provider, req.Model)
 		publishSelectedAuthMetadata(opts.Metadata, auth.ID)
+		m.markAuthSelected(ctx, auth)
 
 		tried[auth.ID] = struct{}{}
 		execCtx := ctx
@@ -1168,6 +1183,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 		entry := logEntryWithRequestID(ctx)
 		debugLogAuthSelection(entry, auth, provider, req.Model)
 		publishSelectedAuthMetadata(opts.Metadata, auth.ID)
+		m.markAuthSelected(ctx, auth)
 
 		tried[auth.ID] = struct{}{}
 		execCtx := ctx
@@ -1254,6 +1270,7 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 		entry := logEntryWithRequestID(ctx)
 		debugLogAuthSelection(entry, auth, provider, req.Model)
 		publishSelectedAuthMetadata(opts.Metadata, auth.ID)
+		m.markAuthSelected(ctx, auth)
 
 		tried[auth.ID] = struct{}{}
 		execCtx := ctx
@@ -2561,6 +2578,54 @@ func (m *Manager) refreshAuthWithLimit(ctx context.Context, id string) {
 		return
 	}
 	m.refreshAuth(ctx, id)
+}
+
+func maxRoundRobinSelectionSeq(auths map[string]*Auth) uint64 {
+	var maxSeq uint64
+	for _, auth := range auths {
+		if auth == nil {
+			continue
+		}
+		if seq := auth.RoundRobinSelectionSeq(); seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+	return maxSeq
+}
+
+func (m *Manager) nextRoundRobinSelectionSeq() uint64 {
+	if m == nil {
+		return 0
+	}
+	return m.selectionSeq.Add(1)
+}
+
+func (m *Manager) markAuthSelected(ctx context.Context, auth *Auth) {
+	if m == nil || auth == nil || strings.TrimSpace(auth.ID) == "" {
+		return
+	}
+
+	seq := m.nextRoundRobinSelectionSeq()
+	if seq == 0 {
+		return
+	}
+
+	var snapshot *Auth
+	m.mu.Lock()
+	current := m.auths[auth.ID]
+	if current != nil {
+		current.SetRoundRobinSelectionSeq(seq)
+		snapshot = current.Clone()
+	}
+	m.mu.Unlock()
+
+	if snapshot == nil {
+		return
+	}
+	if m.scheduler != nil {
+		m.scheduler.upsertAuth(snapshot)
+	}
+	_ = m.persist(ctx, snapshot)
 }
 
 func (m *Manager) snapshotAuths() []*Auth {

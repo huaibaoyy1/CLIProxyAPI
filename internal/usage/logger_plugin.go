@@ -17,6 +17,8 @@ import (
 
 var statisticsEnabled atomic.Bool
 
+const requestDetailRetentionLimit = 1000
+
 func init() {
 	statisticsEnabled.Store(true)
 	coreusage.RegisterPlugin(NewLoggerPlugin())
@@ -230,6 +232,7 @@ func (s *RequestStatistics) updateAPIStats(stats *apiStats, model string, detail
 	modelStatsValue.TokenStats.CachedTokens += detail.Tokens.CachedTokens
 	modelStatsValue.TokenStats.TotalTokens += detail.Tokens.TotalTokens
 	modelStatsValue.Details = append(modelStatsValue.Details, detail)
+	modelStatsValue.Details = trimRequestDetails(modelStatsValue.Details)
 }
 
 // Snapshot returns a copy of the aggregated metrics for external consumption.
@@ -386,6 +389,15 @@ func (s *RequestStatistics) recordImported(apiName, modelName string, stats *api
 	s.requestsByHour[hourKey]++
 	s.tokensByDay[dayKey] += totalTokens
 	s.tokensByHour[hourKey] += totalTokens
+}
+
+func trimRequestDetails(details []RequestDetail) []RequestDetail {
+	if len(details) <= requestDetailRetentionLimit {
+		return details
+	}
+	trimmed := make([]RequestDetail, requestDetailRetentionLimit)
+	copy(trimmed, details[len(details)-requestDetailRetentionLimit:])
+	return trimmed
 }
 
 func dedupKey(apiName, modelName string, detail RequestDetail) string {

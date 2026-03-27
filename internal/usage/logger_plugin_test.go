@@ -94,3 +94,42 @@ func TestRequestStatisticsMergeSnapshotDedupIgnoresLatency(t *testing.T) {
 		t.Fatalf("details len = %d, want 1", len(details))
 	}
 }
+
+func TestRequestStatisticsRecordTrimsDetailsWithoutAffectingTotals(t *testing.T) {
+	stats := NewRequestStatistics()
+
+	for i := 0; i < requestDetailRetentionLimit+25; i++ {
+		stats.Record(context.Background(), coreusage.Record{
+			APIKey:      "test-key",
+			Model:       "gpt-5.4",
+			RequestedAt: time.Date(2026, 3, 20, 12, 0, 0, i, time.UTC),
+			Detail: coreusage.Detail{
+				InputTokens:  1,
+				OutputTokens: 2,
+				TotalTokens:  3,
+			},
+		})
+	}
+
+	snapshot := stats.Snapshot()
+	model := snapshot.APIs["test-key"].Models["gpt-5.4"]
+
+	if got, want := len(model.Details), requestDetailRetentionLimit; got != want {
+		t.Fatalf("details len = %d, want %d", got, want)
+	}
+	if got, want := model.TotalRequests, int64(requestDetailRetentionLimit+25); got != want {
+		t.Fatalf("model total_requests = %d, want %d", got, want)
+	}
+	if got, want := model.TotalTokens, int64((requestDetailRetentionLimit+25)*3); got != want {
+		t.Fatalf("model total_tokens = %d, want %d", got, want)
+	}
+	if got, want := snapshot.TotalRequests, int64(requestDetailRetentionLimit+25); got != want {
+		t.Fatalf("snapshot total_requests = %d, want %d", got, want)
+	}
+	if got, want := snapshot.TotalTokens, int64((requestDetailRetentionLimit+25)*3); got != want {
+		t.Fatalf("snapshot total_tokens = %d, want %d", got, want)
+	}
+	if first := model.Details[0].Timestamp.Nanosecond(); first != 25 {
+		t.Fatalf("first retained detail nanosecond = %d, want %d", first, 25)
+	}
+}
