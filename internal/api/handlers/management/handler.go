@@ -47,9 +47,10 @@ type Handler struct {
 	allowRemoteOverride bool
 	envSecret           string
 	logDir              string
-	postAuthHook          coreauth.PostAuthHook
-	authStatusProbeMu     sync.Mutex
+	postAuthHook           coreauth.PostAuthHook
+	authStatusProbeMu      sync.Mutex
 	authStatusProbeRunning bool
+	authStatusProbeState   authStatusProbeState
 }
 
 // NewHandler creates a new management handler instance.

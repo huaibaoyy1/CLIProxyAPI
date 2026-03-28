@@ -36,6 +36,32 @@ type releaseInfo struct {
 	Name    string `json:"name"`
 }
 
+func resolveLatestReleaseURL(repo string) string {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return latestReleaseURL
+	}
+
+	if strings.HasPrefix(strings.ToLower(repo), "https://api.github.com/") {
+		repo = strings.TrimSuffix(repo, "/")
+		if !strings.HasSuffix(strings.ToLower(repo), "/releases/latest") {
+			repo += "/releases/latest"
+		}
+		return repo
+	}
+
+	if strings.HasPrefix(strings.ToLower(repo), "https://github.com/") {
+		trimmed := strings.TrimSuffix(repo, "/")
+		parts := strings.Split(strings.TrimPrefix(trimmed, "https://github.com/"), "/")
+		if len(parts) >= 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
+			repoName := strings.TrimSuffix(strings.TrimSpace(parts[1]), ".git")
+			return fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", strings.TrimSpace(parts[0]), repoName)
+		}
+	}
+
+	return latestReleaseURL
+}
+
 // GetLatestVersion returns the latest release version from GitHub without downloading assets.
 func (h *Handler) GetLatestVersion(c *gin.Context) {
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -48,7 +74,12 @@ func (h *Handler) GetLatestVersion(c *gin.Context) {
 		util.SetProxy(sdkCfg, client)
 	}
 
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, latestReleaseURL, nil)
+	releaseURL := latestReleaseURL
+	if h != nil && h.cfg != nil {
+		releaseURL = resolveLatestReleaseURL(h.cfg.RemoteManagement.PanelGitHubRepository)
+	}
+
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, releaseURL, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "request_create_failed", "message": err.Error()})
 		return
