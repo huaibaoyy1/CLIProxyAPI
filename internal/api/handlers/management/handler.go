@@ -47,7 +47,9 @@ type Handler struct {
 	allowRemoteOverride bool
 	envSecret           string
 	logDir              string
-	postAuthHook        coreauth.PostAuthHook
+	postAuthHook          coreauth.PostAuthHook
+	authStatusProbeMu     sync.Mutex
+	authStatusProbeRunning bool
 }
 
 // NewHandler creates a new management handler instance.
@@ -66,6 +68,7 @@ func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Man
 		envSecret:           envSecret,
 	}
 	h.startAttemptCleanup()
+	h.startAuthStatusProbeLoop()
 	return h
 }
 

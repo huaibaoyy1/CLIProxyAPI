@@ -546,6 +546,11 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 	if !auth.NextRetryAfter.IsZero() {
 		entry["next_retry_after"] = auth.NextRetryAfter
 	}
+	if auth.Metadata != nil {
+		if quotaOverview, ok := auth.Metadata["quota_overview"]; ok && quotaOverview != nil {
+			entry["quota_overview"] = quotaOverview
+		}
+	}
 	if path != "" {
 		entry["path"] = path
 		entry["source"] = "file"
