@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	latestReleaseURL       = "https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest"
+	latestReleaseURL       = "https://api.github.com/repos/huaibaoyy1/CLIProxyAPI/releases/latest"
 	latestReleaseUserAgent = "CLIProxyAPI"
 )
 
@@ -74,12 +74,7 @@ func (h *Handler) GetLatestVersion(c *gin.Context) {
 		util.SetProxy(sdkCfg, client)
 	}
 
-	releaseURL := latestReleaseURL
-	if h != nil && h.cfg != nil {
-		releaseURL = resolveLatestReleaseURL(h.cfg.RemoteManagement.PanelGitHubRepository)
-	}
-
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, releaseURL, nil)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, latestReleaseURL, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "request_create_failed", "message": err.Error()})
 		return

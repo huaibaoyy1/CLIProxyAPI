@@ -181,6 +181,12 @@ type RemoteManagement struct {
 	// DisableAutoUpdatePanel disables automatic periodic background updates of the management panel asset from GitHub.
 	// When false (the default), the background updater remains enabled; when true, the panel is only downloaded on first access if missing.
 	DisableAutoUpdatePanel bool `yaml:"disable-auto-update-panel"`
+	// EnableAuthStatusProbeScheduler enables the background scheduled auth status probe task.
+	// When false (the default), periodic auth status detection is disabled and only manual refresh is available.
+	EnableAuthStatusProbeScheduler bool `yaml:"enable-auth-status-probe-scheduler"`
+	// AuthStatusProbeIntervalHours controls how often the scheduled auth status probe runs.
+	// Default is 8 hours. Values <= 0 fall back to the default.
+	AuthStatusProbeIntervalHours int `yaml:"auth-status-probe-interval-hours"`
 	// PanelGitHubRepository overrides the GitHub repository used to fetch the management panel asset.
 	// Accepts either a repository URL (https://github.com/org/repo) or an API releases endpoint.
 	PanelGitHubRepository string `yaml:"panel-github-repository"`
@@ -571,6 +577,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
 	cfg.AmpCode.RestrictManagementToLocalhost = false // Default to false: API key auth is sufficient
+	cfg.RemoteManagement.AuthStatusProbeIntervalHours = 8
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 	if err = yaml.Unmarshal(data, &cfg); err != nil {
 		if optional {
@@ -630,6 +637,10 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	if cfg.MaxRetryCredentials < 0 {
 		cfg.MaxRetryCredentials = 0
+	}
+
+	if cfg.RemoteManagement.AuthStatusProbeIntervalHours <= 0 {
+		cfg.RemoteManagement.AuthStatusProbeIntervalHours = 8
 	}
 
 	// Sanitize Gemini API key configuration and migrate legacy entries.
@@ -1309,6 +1320,8 @@ func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 		switch fullPath {
 		case "error-logs-max-files":
 			return node.Value == "10"
+		case "remote-management.auth-status-probe-interval-hours":
+			return node.Value == "8"
 		}
 	}
 

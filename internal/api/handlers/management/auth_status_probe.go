@@ -17,13 +17,13 @@ import (
 )
 
 const (
-	authStatusProbeInterval     = 2 * time.Hour
-	authStatusProbeTimeout      = 45 * time.Second
-	authStatusProbeConcurrency  = 50
-	authStatusProbeMaxAttempts  = 3
-	authStatusProbeRetryBackoff = 1500 * time.Millisecond
-	codexUsageProbeURL          = "https://chatgpt.com/backend-api/wham/usage"
-	codexUsageProbeUserAgent    = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
+	authStatusProbeDefaultIntervalHours = 8
+	authStatusProbeTimeout              = 45 * time.Second
+	authStatusProbeConcurrency          = 50
+	authStatusProbeMaxAttempts          = 3
+	authStatusProbeRetryBackoff         = 1500 * time.Millisecond
+	codexUsageProbeURL                  = "https://chatgpt.com/backend-api/wham/usage"
+	codexUsageProbeUserAgent            = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
 )
 
 type authStatusProbeRequest struct {
@@ -119,10 +119,15 @@ type parsedCodexUsageWindow struct {
 
 func (h *Handler) startAuthStatusProbeLoop() {
 	go func() {
-		ticker := time.NewTicker(authStatusProbeInterval)
-		defer ticker.Stop()
+		for {
+			timer := time.NewTimer(h.authStatusProbeInterval())
+			<-timer.C
 
-		for range ticker.C {
+			if !h.isAuthStatusProbeSchedulerEnabled() {
+				log.Debug("auth status probe scheduler skipped: disabled by configuration")
+				continue
+			}
+
 			_, started, err := h.scheduleAuthStatusProbe(nil, false, "scheduled")
 			if err != nil {
 				log.WithError(err).Warn("failed to schedule auth status probe")
@@ -133,6 +138,26 @@ func (h *Handler) startAuthStatusProbeLoop() {
 			}
 		}
 	}()
+}
+
+func (h *Handler) isAuthStatusProbeSchedulerEnabled() bool {
+	if h == nil || h.cfg == nil {
+		return false
+	}
+	return h.cfg.RemoteManagement.EnableAuthStatusProbeScheduler
+}
+
+func (h *Handler) authStatusProbeInterval() time.Duration {
+	if h == nil || h.cfg == nil {
+		return time.Duration(authStatusProbeDefaultIntervalHours) * time.Hour
+	}
+
+	hours := h.cfg.RemoteManagement.AuthStatusProbeIntervalHours
+	if hours <= 0 {
+		hours = authStatusProbeDefaultIntervalHours
+	}
+
+	return time.Duration(hours) * time.Hour
 }
 
 func (h *Handler) TriggerAuthStatusProbe(c *gin.Context) {
@@ -772,7 +797,7 @@ func (h *Handler) applyAuthProbeUnauthorized(ctx context.Context, auth *coreauth
 	next.Status = coreauth.StatusError
 	next.StatusMessage = "unauthorized"
 	next.Unavailable = true
-	next.NextRetryAfter = now.Add(authStatusProbeInterval)
+	next.NextRetryAfter = now.Add(h.authStatusProbeInterval())
 	next.LastRefreshedAt = now
 	next.UpdatedAt = now
 	_, _ = h.authManager.Update(ctx, next)
