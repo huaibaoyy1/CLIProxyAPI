@@ -25,6 +25,16 @@ jobs:
         with:
           go-version: '>=1.26.0'
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: temp/Cli-Proxy-API-Management-Center/package-lock.json
+      - name: Build management panel asset
+        run: |
+          cd temp/Cli-Proxy-API-Management-Center
+          npm ci
+          npm run build
       - name: Generate Build Metadata
         run: |
           echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
@@ -40,3 +50,7 @@ jobs:
           VERSION: ${{ env.VERSION }}
           COMMIT: ${{ env.COMMIT }}
           BUILD_DATE: ${{ env.BUILD_DATE }}
+      - name: Upload management.html release asset
+        run: gh release upload "${GITHUB_REF_NAME}" management.html --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
