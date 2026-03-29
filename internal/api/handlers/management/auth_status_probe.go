@@ -931,6 +931,8 @@ func (h *Handler) applyAuthProbeHealthy(
 	if next.Metadata == nil {
 		next.Metadata = make(map[string]any)
 	}
+	next.Metadata["last_refresh"] = now.UTC().Format(time.RFC3339)
+	next.Metadata["last_refreshed_at"] = now.UTC().Format(time.RFC3339)
 	if len(quotaOverview) > 0 {
 		next.Metadata["quota_overview"] = quotaOverview
 	} else {
@@ -951,6 +953,11 @@ func (h *Handler) applyAuthProbeUnauthorized(ctx context.Context, auth *coreauth
 	next.NextRetryAfter = now.Add(h.authStatusProbeInterval())
 	next.LastRefreshedAt = now
 	next.UpdatedAt = now
+	if next.Metadata == nil {
+		next.Metadata = make(map[string]any)
+	}
+	next.Metadata["last_refresh"] = now.UTC().Format(time.RFC3339)
+	next.Metadata["last_refreshed_at"] = now.UTC().Format(time.RFC3339)
 	_, _ = h.authManager.Update(ctx, next)
 }
 
@@ -966,6 +973,11 @@ func (h *Handler) applyAuthProbeHTTPError(ctx context.Context, auth *coreauth.Au
 	next.NextRetryAfter = now.Add(30 * time.Minute)
 	next.LastRefreshedAt = now
 	next.UpdatedAt = now
+	if next.Metadata == nil {
+		next.Metadata = make(map[string]any)
+	}
+	next.Metadata["last_refresh"] = now.UTC().Format(time.RFC3339)
+	next.Metadata["last_refreshed_at"] = now.UTC().Format(time.RFC3339)
 	_, _ = h.authManager.Update(ctx, next)
 }
 
@@ -981,6 +993,11 @@ func (h *Handler) applyAuthProbeFailure(ctx context.Context, auth *coreauth.Auth
 	next.NextRetryAfter = now.Add(30 * time.Minute)
 	next.LastRefreshedAt = now
 	next.UpdatedAt = now
+	if next.Metadata == nil {
+		next.Metadata = make(map[string]any)
+	}
+	next.Metadata["last_refresh"] = now.UTC().Format(time.RFC3339)
+	next.Metadata["last_refreshed_at"] = now.UTC().Format(time.RFC3339)
 	_, _ = h.authManager.Update(ctx, next)
 }
 
