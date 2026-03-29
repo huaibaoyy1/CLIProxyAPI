@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ const (
 	authStatusProbeRetryBackoff         = 1500 * time.Millisecond
 	codexUsageProbeURL                  = "https://chatgpt.com/backend-api/wham/usage"
 	codexUsageProbeUserAgent            = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
+	authStatusProbeStateFileName        = ".auth-status-probe-state"
 )
 
 type authStatusProbeRequest struct {
@@ -120,7 +122,7 @@ type parsedCodexUsageWindow struct {
 func (h *Handler) startAuthStatusProbeLoop() {
 	go func() {
 		for {
-			timer := time.NewTimer(h.authStatusProbeInterval())
+			timer := time.NewTimer(h.authStatusProbeNextDelay(time.Now()))
 			<-timer.C
 
 			if !h.isAuthStatusProbeSchedulerEnabled() {
@@ -158,6 +160,150 @@ func (h *Handler) authStatusProbeInterval() time.Duration {
 	}
 
 	return time.Duration(hours) * time.Hour
+}
+
+func (h *Handler) authStatusProbePersistencePath() string {
+	if h == nil {
+		return ""
+	}
+	if trimmed := strings.TrimSpace(h.configFilePath); trimmed != "" {
+		return trimmed + "." + strings.TrimPrefix(authStatusProbeStateFileName, ".")
+	}
+	if h.cfg != nil {
+		if authDir := strings.TrimSpace(h.cfg.AuthDir); authDir != "" {
+			return filepath.Join(authDir, authStatusProbeStateFileName)
+		}
+	}
+	return ""
+}
+
+func sanitizePersistedAuthStatusProbeState(state authStatusProbeState) authStatusProbeState {
+	state.Running = false
+	if state.Status == "running" {
+		if !state.LastCompletedAt.IsZero() || !state.CompletedAt.IsZero() {
+			state.Status = "completed"
+		} else if strings.TrimSpace(state.LastError) != "" {
+			state.Status = "failed"
+		} else {
+			state.Status = ""
+		}
+	}
+	if state.LastCompletedAt.IsZero() && !state.CompletedAt.IsZero() {
+		state.LastCompletedAt = state.CompletedAt
+	}
+	state.Summary = copyAuthStatusProbeSummary(state.Summary)
+	return state
+}
+
+func (h *Handler) loadPersistedAuthStatusProbeState() {
+	if h == nil {
+		return
+	}
+	path := h.authStatusProbePersistencePath()
+	if path == "" {
+		return
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.WithError(err).Warn("failed to read persisted auth status probe state")
+		}
+		return
+	}
+
+	var state authStatusProbeState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		log.WithError(err).Warn("failed to decode persisted auth status probe state")
+		return
+	}
+	state = sanitizePersistedAuthStatusProbeState(state)
+
+	h.authStatusProbeMu.Lock()
+	if !h.authStatusProbeRunning {
+		h.authStatusProbeState = state
+	}
+	h.authStatusProbeMu.Unlock()
+}
+
+func (h *Handler) persistAuthStatusProbeState(state authStatusProbeState) {
+	if h == nil {
+		return
+	}
+	path := h.authStatusProbePersistencePath()
+	if path == "" {
+		return
+	}
+
+	state = sanitizePersistedAuthStatusProbeState(state)
+	raw, err := json.Marshal(state)
+	if err != nil {
+		log.WithError(err).Warn("failed to encode auth status probe state")
+		return
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		log.WithError(err).Warn("failed to prepare auth status probe state directory")
+		return
+	}
+
+	tempPath := path + ".tmp"
+	if err := os.WriteFile(tempPath, raw, 0o600); err != nil {
+		log.WithError(err).Warn("failed to write auth status probe state")
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.WithError(err).Warn("failed to replace auth status probe state")
+		_ = os.Remove(tempPath)
+		return
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		log.WithError(err).Warn("failed to finalize auth status probe state")
+		_ = os.Remove(tempPath)
+	}
+}
+
+func (h *Handler) authStatusProbeNextDelay(now time.Time) time.Duration {
+	interval := h.authStatusProbeInterval()
+	if interval <= 0 {
+		interval = time.Duration(authStatusProbeDefaultIntervalHours) * time.Hour
+	}
+
+	if h == nil {
+		return interval
+	}
+	if !h.isAuthStatusProbeSchedulerEnabled() {
+		return interval
+	}
+
+	h.authStatusProbeMu.Lock()
+	state := h.authStatusProbeState
+	running := h.authStatusProbeRunning || state.Running
+	h.authStatusProbeMu.Unlock()
+
+	if running {
+		if !state.StartedAt.IsZero() {
+			next := state.StartedAt.Add(interval)
+			if next.After(now) {
+				return next.Sub(now)
+			}
+		}
+		return interval
+	}
+
+	anchor := state.LastCompletedAt
+	if anchor.IsZero() {
+		anchor = state.CompletedAt
+	}
+	if anchor.IsZero() {
+		return interval
+	}
+
+	next := anchor.Add(interval)
+	if !next.After(now) {
+		return 0
+	}
+	return next.Sub(now)
 }
 
 func (h *Handler) TriggerAuthStatusProbe(c *gin.Context) {
@@ -235,6 +381,8 @@ func (h *Handler) scheduleAuthStatusProbe(
 	}
 	state := h.copyAuthStatusProbeStateLocked()
 	h.authStatusProbeMu.Unlock()
+
+	h.persistAuthStatusProbeState(state)
 
 	go h.executeAuthStatusProbe(normalizedNames, allowDisabled, trigger, startedAt)
 
@@ -335,7 +483,6 @@ func (h *Handler) completeAuthStatusProbe(
 	completedAt := time.Now()
 
 	h.authStatusProbeMu.Lock()
-	defer h.authStatusProbeMu.Unlock()
 
 	state := h.authStatusProbeState
 	state.Running = false
@@ -378,6 +525,10 @@ func (h *Handler) completeAuthStatusProbe(
 
 	h.authStatusProbeRunning = false
 	h.authStatusProbeState = state
+	persistedState := h.copyAuthStatusProbeStateLocked()
+	h.authStatusProbeMu.Unlock()
+
+	h.persistAuthStatusProbeState(persistedState)
 }
 
 func (h *Handler) runAuthStatusProbe(
