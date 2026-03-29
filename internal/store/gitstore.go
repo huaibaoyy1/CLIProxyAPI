@@ -437,17 +437,62 @@ func (s *GitTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth, 
 		return nil, fmt.Errorf("stat file: %w", err)
 	}
 	id := s.idFor(path, baseDir)
+	disabled := false
+	switch rawDisabled := metadata["disabled"].(type) {
+	case bool:
+		disabled = rawDisabled
+	case string:
+		disabled = strings.EqualFold(strings.TrimSpace(rawDisabled), "true")
+	}
+
+	status := cliproxyauth.StatusActive
+	if rawStatus, ok := metadata["status"].(string); ok {
+		trimmedStatus := strings.TrimSpace(rawStatus)
+		if trimmedStatus != "" {
+			status = cliproxyauth.Status(trimmedStatus)
+		}
+	}
+	if disabled {
+		status = cliproxyauth.StatusDisabled
+	}
+
+	statusMessage := ""
+	if rawStatusMessage, ok := metadata["status_message"].(string); ok {
+		statusMessage = strings.TrimSpace(rawStatusMessage)
+	}
+
+	lastRefreshedAt := time.Time{}
+	if rawLastRefresh, ok := metadata["lastRefresh"]; ok {
+		switch value := rawLastRefresh.(type) {
+		case string:
+			trimmed := strings.TrimSpace(value)
+			if trimmed != "" {
+				if parsed, errParse := time.Parse(time.RFC3339, trimmed); errParse == nil {
+					lastRefreshedAt = parsed
+				} else if parsed, errParse := time.Parse(time.RFC3339Nano, trimmed); errParse == nil {
+					lastRefreshedAt = parsed
+				}
+			}
+		case float64:
+			if value > 0 {
+				lastRefreshedAt = time.Unix(int64(value), 0)
+			}
+		}
+	}
+
 	auth := &cliproxyauth.Auth{
 		ID:               id,
 		Provider:         provider,
 		FileName:         id,
 		Label:            s.labelFor(metadata),
-		Status:           cliproxyauth.StatusActive,
+		Status:           status,
+		StatusMessage:    statusMessage,
+		Disabled:         disabled,
 		Attributes:       map[string]string{"path": path},
 		Metadata:         metadata,
 		CreatedAt:        info.ModTime(),
 		UpdatedAt:        info.ModTime(),
-		LastRefreshedAt:  time.Time{},
+		LastRefreshedAt:  lastRefreshedAt,
 		NextRefreshAfter: time.Time{},
 	}
 	if email, ok := metadata["email"].(string); ok && email != "" {
