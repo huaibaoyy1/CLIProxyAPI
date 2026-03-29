@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -232,23 +233,82 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 		return nil, fmt.Errorf("stat file: %w", err)
 	}
 	id := s.idFor(path, baseDir)
-	disabled, _ := metadata["disabled"].(bool)
+	disabled := false
+	switch rawDisabled := metadata["disabled"].(type) {
+	case bool:
+		disabled = rawDisabled
+	case string:
+		disabled = strings.EqualFold(strings.TrimSpace(rawDisabled), "true")
+	}
+
 	status := cliproxyauth.StatusActive
+	if rawStatus, ok := metadata["status"].(string); ok {
+		trimmedStatus := strings.TrimSpace(rawStatus)
+		if trimmedStatus != "" {
+			status = cliproxyauth.Status(trimmedStatus)
+		}
+	}
 	if disabled {
 		status = cliproxyauth.StatusDisabled
 	}
+
+	statusMessage := ""
+	if rawStatusMessage, ok := metadata["status_message"].(string); ok {
+		statusMessage = strings.TrimSpace(rawStatusMessage)
+	}
+
+	lastRefreshedAt := time.Time{}
+	for _, key := range []string{"last_refresh", "lastRefresh", "last_refreshed_at", "lastRefreshedAt"} {
+		rawValue, ok := metadata[key]
+		if !ok {
+			continue
+		}
+		switch value := rawValue.(type) {
+		case string:
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" {
+				continue
+			}
+			if parsed, errParse := time.Parse(time.RFC3339, trimmed); errParse == nil {
+				lastRefreshedAt = parsed
+				break
+			}
+			if parsed, errParse := time.Parse(time.RFC3339Nano, trimmed); errParse == nil {
+				lastRefreshedAt = parsed
+				break
+			}
+			if unix, errParse := strconv.ParseInt(trimmed, 10, 64); errParse == nil && unix > 0 {
+				if unix > 1_000_000_000_000 {
+					lastRefreshedAt = time.UnixMilli(unix)
+				} else {
+					lastRefreshedAt = time.Unix(unix, 0)
+				}
+				break
+			}
+		case float64:
+			if value > 0 {
+				lastRefreshedAt = time.Unix(int64(value), 0)
+				break
+			}
+		}
+		if !lastRefreshedAt.IsZero() {
+			break
+		}
+	}
+
 	auth := &cliproxyauth.Auth{
 		ID:               id,
 		Provider:         provider,
 		FileName:         id,
 		Label:            s.labelFor(metadata),
 		Status:           status,
+		StatusMessage:    statusMessage,
 		Disabled:         disabled,
 		Attributes:       map[string]string{"path": path},
 		Metadata:         metadata,
 		CreatedAt:        info.ModTime(),
 		UpdatedAt:        info.ModTime(),
-		LastRefreshedAt:  time.Time{},
+		LastRefreshedAt:  lastRefreshedAt,
 		NextRefreshAfter: time.Time{},
 	}
 	if email, ok := metadata["email"].(string); ok && email != "" {
