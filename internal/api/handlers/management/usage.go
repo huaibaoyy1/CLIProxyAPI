@@ -44,8 +44,11 @@ func (h *Handler) GetUsageStatistics(c *gin.Context) {
 	requests := flattenUsageRequestDetails(snapshot)
 	pagedRequests, total, totalPages := paginateUsageRequestEntries(requests, page, pageSize)
 
+	snapshotWithoutDetails := snapshot
+	stripUsageSnapshotDetails(&snapshotWithoutDetails)
+
 	c.JSON(http.StatusOK, gin.H{
-		"usage":           snapshot,
+		"usage":           snapshotWithoutDetails,
 		"failed_requests": snapshot.FailureCount,
 		"request_details": pagedRequests,
 		"page":            page,
@@ -103,7 +106,7 @@ func (h *Handler) ImportUsageStatistics(c *gin.Context) {
 
 func parseUsagePagination(c *gin.Context) (page int, pageSize int) {
 	page = 1
-	pageSize = 50
+	pageSize = 200
 
 	if c == nil {
 		return page, pageSize
@@ -123,7 +126,7 @@ func parseUsagePagination(c *gin.Context) (page int, pageSize int) {
 
 	switch {
 	case pageSize <= 0:
-		pageSize = 50
+		pageSize = 200
 	case pageSize > 200:
 		pageSize = 200
 	}
@@ -194,7 +197,7 @@ func paginateUsageRequestEntries(entries []usageRequestEntry, page int, pageSize
 		page = 1
 	}
 	if pageSize <= 0 {
-		pageSize = 50
+		pageSize = 200
 	}
 
 	if total == 0 {

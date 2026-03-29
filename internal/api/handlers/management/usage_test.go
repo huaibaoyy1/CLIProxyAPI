@@ -11,7 +11,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 )
 
-func TestGetUsageStatisticsPreservesSnapshotDetailsAndReturnsPagedRequestDetails(t *testing.T) {
+func TestGetUsageStatisticsStripsSnapshotDetailsAndReturnsPagedRequestDetails(t *testing.T) {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
@@ -119,12 +119,8 @@ func TestGetUsageStatisticsPreservesSnapshotDetailsAndReturnsPagedRequestDetails
 	if !ok {
 		t.Fatalf("usage.apis[api-1].models[gpt-4.1] missing or invalid: %#v", models["gpt-4.1"])
 	}
-	details, ok := model["details"].([]any)
-	if !ok {
-		t.Fatalf("usage snapshot details missing or invalid: %#v", model["details"])
-	}
-	if len(details) != 1 {
-		t.Fatalf("unexpected usage snapshot details length: got %d", len(details))
+	if _, exists := model["details"]; exists {
+		t.Fatalf("usage snapshot details should be stripped from summary payload: %#v", model["details"])
 	}
 }
 
