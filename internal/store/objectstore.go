@@ -589,17 +589,62 @@ func (s *ObjectTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Aut
 	if email := strings.TrimSpace(valueAsString(metadata["email"])); email != "" {
 		attr["email"] = email
 	}
+	disabled := false
+	switch rawDisabled := metadata["disabled"].(type) {
+	case bool:
+		disabled = rawDisabled
+	case string:
+		disabled = strings.EqualFold(strings.TrimSpace(rawDisabled), "true")
+	}
+
+	status := cliproxyauth.StatusActive
+	if rawStatus, ok := metadata["status"].(string); ok {
+		trimmedStatus := strings.TrimSpace(rawStatus)
+		if trimmedStatus != "" {
+			status = cliproxyauth.Status(trimmedStatus)
+		}
+	}
+	if disabled {
+		status = cliproxyauth.StatusDisabled
+	}
+
+	statusMessage := ""
+	if rawStatusMessage, ok := metadata["status_message"].(string); ok {
+		statusMessage = strings.TrimSpace(rawStatusMessage)
+	}
+
+	lastRefreshedAt := time.Time{}
+	if rawLastRefresh, ok := metadata["lastRefresh"]; ok {
+		switch value := rawLastRefresh.(type) {
+		case string:
+			trimmed := strings.TrimSpace(value)
+			if trimmed != "" {
+				if parsed, errParse := time.Parse(time.RFC3339, trimmed); errParse == nil {
+					lastRefreshedAt = parsed
+				} else if parsed, errParse := time.Parse(time.RFC3339Nano, trimmed); errParse == nil {
+					lastRefreshedAt = parsed
+				}
+			}
+		case float64:
+			if value > 0 {
+				lastRefreshedAt = time.Unix(int64(value), 0)
+			}
+		}
+	}
+
 	auth := &cliproxyauth.Auth{
 		ID:               rel,
 		Provider:         provider,
 		FileName:         rel,
 		Label:            labelFor(metadata),
-		Status:           cliproxyauth.StatusActive,
+		Status:           status,
+		StatusMessage:    statusMessage,
+		Disabled:         disabled,
 		Attributes:       attr,
 		Metadata:         metadata,
 		CreatedAt:        info.ModTime(),
 		UpdatedAt:        info.ModTime(),
-		LastRefreshedAt:  time.Time{},
+		LastRefreshedAt:  lastRefreshedAt,
 		NextRefreshAfter: time.Time{},
 	}
 	return auth, nil
