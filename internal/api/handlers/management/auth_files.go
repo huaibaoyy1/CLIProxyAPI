@@ -1129,6 +1129,19 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 	}
 	lastRefresh, hasLastRefresh := extractLastRefreshTimestamp(metadata)
 
+	disabled := false
+	switch rawDisabled := metadata["disabled"].(type) {
+	case bool:
+		disabled = rawDisabled
+	case string:
+		disabled = strings.EqualFold(strings.TrimSpace(rawDisabled), "true")
+	}
+	status := coreauth.StatusActive
+	if disabled {
+		status = coreauth.StatusDisabled
+	}
+	statusMessage, _ := metadata["status_message"].(string)
+
 	authID := h.authIDForPath(path)
 	if authID == "" {
 		authID = path
@@ -1138,15 +1151,17 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 		"source": path,
 	}
 	auth := &coreauth.Auth{
-		ID:         authID,
-		Provider:   provider,
-		FileName:   filepath.Base(path),
-		Label:      label,
-		Status:     coreauth.StatusActive,
-		Attributes: attr,
-		Metadata:   metadata,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:            authID,
+		Provider:      provider,
+		FileName:      filepath.Base(path),
+		Label:         label,
+		Status:        status,
+		StatusMessage: strings.TrimSpace(statusMessage),
+		Disabled:      disabled,
+		Attributes:    attr,
+		Metadata:      metadata,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	if hasLastRefresh {
 		auth.LastRefreshedAt = lastRefresh
@@ -1235,6 +1250,18 @@ func (h *Handler) PatchAuthFileStatus(c *gin.Context) {
 	}
 	targetAuth.UpdatedAt = time.Now()
 
+	if targetAuth.Metadata == nil {
+		targetAuth.Metadata = make(map[string]any)
+	}
+	targetAuth.Metadata["disabled"] = *req.Disabled
+	targetAuth.Metadata["status"] = string(targetAuth.Status)
+	if strings.TrimSpace(targetAuth.StatusMessage) == "" {
+		delete(targetAuth.Metadata, "status_message")
+	} else {
+		targetAuth.Metadata["status_message"] = targetAuth.StatusMessage
+	}
+	targetAuth.Metadata["updated_at"] = targetAuth.UpdatedAt.UTC().Format(time.RFC3339)
+
 	if _, err := h.authManager.Update(ctx, targetAuth); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update auth: %v", err)})
 		return
@@ -1290,21 +1317,39 @@ func (h *Handler) PatchAuthFileFields(c *gin.Context) {
 	}
 
 	changed := false
-	if req.Prefix != nil {
-		targetAuth.Prefix = *req.Prefix
-		changed = true
-	}
-	if req.ProxyURL != nil {
-		targetAuth.ProxyURL = *req.ProxyURL
-		changed = true
-	}
-	if req.Priority != nil || req.Note != nil {
+	if req.Prefix != nil || req.ProxyURL != nil || req.Priority != nil || req.Note != nil {
 		if targetAuth.Metadata == nil {
 			targetAuth.Metadata = make(map[string]any)
 		}
 		if targetAuth.Attributes == nil {
 			targetAuth.Attributes = make(map[string]string)
 		}
+	}
+	if req.Prefix != nil {
+		trimmedPrefix := strings.TrimSpace(*req.Prefix)
+		targetAuth.Prefix = trimmedPrefix
+		if trimmedPrefix == "" {
+			delete(targetAuth.Metadata, "prefix")
+			delete(targetAuth.Attributes, "prefix")
+		} else {
+			targetAuth.Metadata["prefix"] = trimmedPrefix
+			targetAuth.Attributes["prefix"] = trimmedPrefix
+		}
+		changed = true
+	}
+	if req.ProxyURL != nil {
+		trimmedProxyURL := strings.TrimSpace(*req.ProxyURL)
+		targetAuth.ProxyURL = trimmedProxyURL
+		if trimmedProxyURL == "" {
+			delete(targetAuth.Metadata, "proxy_url")
+			delete(targetAuth.Attributes, "proxy_url")
+		} else {
+			targetAuth.Metadata["proxy_url"] = trimmedProxyURL
+			targetAuth.Attributes["proxy_url"] = trimmedProxyURL
+		}
+		changed = true
+	}
+	if req.Priority != nil || req.Note != nil {
 
 		if req.Priority != nil {
 			if *req.Priority == 0 {
