@@ -1,4 +1,4 @@
-package auth
+﻿package auth
 
 import (
 	"context"
@@ -258,7 +258,7 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 	}
 
 	lastRefreshedAt := time.Time{}
-	for _, key := range []string{"last_refresh", "lastRefresh", "last_refreshed_at", "lastRefreshedAt"} {
+	for _, key := range []string{"lastRefresh"} {
 		rawValue, ok := metadata[key]
 		if !ok {
 			continue

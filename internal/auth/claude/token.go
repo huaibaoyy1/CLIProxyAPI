@@ -1,4 +1,4 @@
-// Package claude provides authentication and token management functionality
+﻿// Package claude provides authentication and token management functionality
 // for Anthropic's Claude AI services. It handles OAuth2 token storage, serialization,
 // and retrieval for maintaining authenticated sessions with the Claude API.
 package claude
@@ -26,7 +26,7 @@ type ClaudeTokenStorage struct {
 	RefreshToken string `json:"refresh_token"`
 
 	// LastRefresh is the timestamp of the last token refresh operation.
-	LastRefresh string `json:"last_refresh"`
+	LastRefresh string `json:"lastRefresh"`
 
 	// Email is the Anthropic account email address associated with this token.
 	Email string `json:"email"`
@@ -87,3 +87,4 @@ func (ts *ClaudeTokenStorage) SaveTokenToFile(authFilePath string) error {
 	}
 	return nil
 }
+

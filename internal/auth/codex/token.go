@@ -1,4 +1,4 @@
-// Package codex provides authentication and token management functionality
+﻿// Package codex provides authentication and token management functionality
 // for OpenAI's Codex AI services. It handles OAuth2 token storage, serialization,
 // and retrieval for maintaining authenticated sessions with the Codex API.
 package codex
@@ -25,7 +25,7 @@ type CodexTokenStorage struct {
 	// AccountID is the OpenAI account identifier associated with this token.
 	AccountID string `json:"account_id"`
 	// LastRefresh is the timestamp of the last token refresh operation.
-	LastRefresh string `json:"last_refresh"`
+	LastRefresh string `json:"lastRefresh"`
 	// Email is the OpenAI account email address associated with this token.
 	Email string `json:"email"`
 	// Type indicates the authentication provider type, always "codex" for this storage.
@@ -80,3 +80,4 @@ func (ts *CodexTokenStorage) SaveTokenToFile(authFilePath string) error {
 	return nil
 
 }
+

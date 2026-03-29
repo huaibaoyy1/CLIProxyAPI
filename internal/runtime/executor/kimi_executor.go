@@ -1,4 +1,4 @@
-package executor
+﻿package executor
 
 import (
 	"bufio"
@@ -473,7 +473,7 @@ func (e *KimiExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*c
 	}
 	auth.Metadata["type"] = "kimi"
 	now := time.Now().Format(time.RFC3339)
-	auth.Metadata["last_refresh"] = now
+	auth.Metadata["lastRefresh"] = now
 	return auth, nil
 }
 
@@ -615,3 +615,4 @@ func stripKimiPrefix(model string) string {
 	}
 	return model
 }
+

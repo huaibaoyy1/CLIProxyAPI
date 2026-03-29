@@ -1,4 +1,4 @@
-package auth
+﻿package auth
 
 import (
 	"context"
@@ -83,7 +83,7 @@ type Auth struct {
 	// UpdatedAt is the last modification timestamp in UTC.
 	UpdatedAt time.Time `json:"updated_at"`
 	// LastRefreshedAt records the last successful refresh time in UTC.
-	LastRefreshedAt time.Time `json:"last_refreshed_at"`
+	LastRefreshedAt time.Time `json:"lastRefresh"`
 	// NextRefreshAfter is the earliest time a refresh should retrigger.
 	NextRefreshAfter time.Time `json:"next_refresh_after"`
 	// NextRetryAfter is the earliest time a retry should retrigger.

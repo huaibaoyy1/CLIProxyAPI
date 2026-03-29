@@ -41,8 +41,6 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
-var lastRefreshKeys = []string{"last_refresh", "lastRefresh", "last_refreshed_at", "lastRefreshedAt"}
-
 const (
 	anthropicCallbackPort = 54545
 	geminiCallbackPort    = 8085
@@ -68,14 +66,11 @@ func extractLastRefreshTimestamp(meta map[string]any) (time.Time, bool) {
 	if len(meta) == 0 {
 		return time.Time{}, false
 	}
-	for _, key := range lastRefreshKeys {
-		if val, ok := meta[key]; ok {
-			if ts, ok1 := parseLastRefreshValue(val); ok1 {
-				return ts, true
-			}
-		}
+	val, ok := meta["lastRefresh"]
+	if !ok {
+		return time.Time{}, false
 	}
-	return time.Time{}, false
+	return parseLastRefreshValue(val)
 }
 
 func parseLastRefreshValue(v any) (time.Time, bool) {
@@ -541,7 +536,7 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 		entry["updated_at"] = auth.UpdatedAt
 	}
 	if !auth.LastRefreshedAt.IsZero() {
-		entry["last_refresh"] = auth.LastRefreshedAt
+		entry["lastRefresh"] = auth.LastRefreshedAt
 	}
 	if !auth.NextRetryAfter.IsZero() {
 		entry["next_retry_after"] = auth.NextRetryAfter
@@ -2495,7 +2490,7 @@ func (h *Handler) RequestIFlowCookieToken(c *gin.Context) {
 			"expired":      tokenStorage.Expire,
 			"cookie":       tokenStorage.Cookie,
 			"type":         tokenStorage.Type,
-			"last_refresh": tokenStorage.LastRefresh,
+			"lastRefresh": tokenStorage.LastRefresh,
 		},
 		Attributes: map[string]string{
 			"api_key": tokenStorage.APIKey,

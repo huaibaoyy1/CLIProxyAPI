@@ -1,4 +1,4 @@
-// Package qwen provides authentication and token management functionality
+﻿// Package qwen provides authentication and token management functionality
 // for Alibaba's Qwen AI services. It handles OAuth2 token storage, serialization,
 // and retrieval for maintaining authenticated sessions with the Qwen API.
 package qwen
@@ -21,7 +21,7 @@ type QwenTokenStorage struct {
 	// RefreshToken is used to obtain new access tokens when the current one expires.
 	RefreshToken string `json:"refresh_token"`
 	// LastRefresh is the timestamp of the last token refresh operation.
-	LastRefresh string `json:"last_refresh"`
+	LastRefresh string `json:"lastRefresh"`
 	// ResourceURL is the base URL for API requests.
 	ResourceURL string `json:"resource_url"`
 	// Email is the Qwen account email address associated with this token.
@@ -77,3 +77,4 @@ func (ts *QwenTokenStorage) SaveTokenToFile(authFilePath string) error {
 	}
 	return nil
 }
+

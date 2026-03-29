@@ -1,4 +1,4 @@
-package iflow
+﻿package iflow
 
 import (
 	"encoding/json"
@@ -13,7 +13,7 @@ import (
 type IFlowTokenStorage struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	LastRefresh  string `json:"last_refresh"`
+	LastRefresh  string `json:"lastRefresh"`
 	Expire       string `json:"expired"`
 	APIKey       string `json:"api_key"`
 	Email        string `json:"email"`
@@ -57,3 +57,4 @@ func (ts *IFlowTokenStorage) SaveTokenToFile(authFilePath string) error {
 	}
 	return nil
 }
+

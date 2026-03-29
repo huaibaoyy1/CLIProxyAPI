@@ -1,4 +1,4 @@
-package executor
+﻿package executor
 
 import (
 	"bufio"
@@ -592,7 +592,7 @@ func (e *CodexExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*
 	auth.Metadata["expired"] = td.Expire
 	auth.Metadata["type"] = "codex"
 	now := time.Now().Format(time.RFC3339)
-	auth.Metadata["last_refresh"] = now
+	auth.Metadata["lastRefresh"] = now
 	return auth, nil
 }
 
@@ -767,3 +767,4 @@ func (e *CodexExecutor) resolveCodexConfig(auth *cliproxyauth.Auth) *config.Code
 	}
 	return nil
 }
+

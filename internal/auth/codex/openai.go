@@ -1,4 +1,4 @@
-package codex
+﻿package codex
 
 // PKCECodes holds the verification codes for the OAuth2 PKCE (Proof Key for Code Exchange) flow.
 // PKCE is an extension to the Authorization Code flow to prevent CSRF and authorization code injection attacks.
@@ -35,5 +35,6 @@ type CodexAuthBundle struct {
 	// TokenData contains the OAuth tokens from the authentication flow
 	TokenData CodexTokenData `json:"token_data"`
 	// LastRefresh is the timestamp of the last token refresh
-	LastRefresh string `json:"last_refresh"`
+	LastRefresh string `json:"lastRefresh"`
 }
+

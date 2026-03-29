@@ -1,4 +1,4 @@
-package claude
+﻿package claude
 
 // PKCECodes holds PKCE verification codes for OAuth2 PKCE flow
 type PKCECodes struct {
@@ -28,5 +28,6 @@ type ClaudeAuthBundle struct {
 	// TokenData contains the OAuth tokens from the authentication flow
 	TokenData ClaudeTokenData `json:"token_data"`
 	// LastRefresh is the timestamp of the last token refresh
-	LastRefresh string `json:"last_refresh"`
+	LastRefresh string `json:"lastRefresh"`
 }
+

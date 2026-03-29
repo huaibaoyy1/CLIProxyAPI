@@ -1,4 +1,4 @@
-package executor
+﻿package executor
 
 import (
 	"bufio"
@@ -383,7 +383,7 @@ func (e *IFlowExecutor) refreshCookieBased(ctx context.Context, auth *cliproxyau
 	auth.Metadata["api_key"] = keyData.APIKey
 	auth.Metadata["expired"] = keyData.ExpireTime
 	auth.Metadata["type"] = "iflow"
-	auth.Metadata["last_refresh"] = time.Now().Format(time.RFC3339)
+	auth.Metadata["lastRefresh"] = time.Now().Format(time.RFC3339)
 	auth.Metadata["cookie"] = cookie
 	auth.Metadata["email"] = email
 
@@ -437,7 +437,7 @@ func (e *IFlowExecutor) refreshOAuthBased(ctx context.Context, auth *cliproxyaut
 	}
 	auth.Metadata["expired"] = tokenData.Expire
 	auth.Metadata["type"] = "iflow"
-	auth.Metadata["last_refresh"] = time.Now().Format(time.RFC3339)
+	auth.Metadata["lastRefresh"] = time.Now().Format(time.RFC3339)
 
 	// Log the new access token (masked) after successful refresh
 	log.Debugf("iflow executor: token refresh successful, new: %s", util.HideAPIKey(tokenData.AccessToken))
@@ -572,3 +572,4 @@ func preserveReasoningContentInMessages(body []byte) []byte {
 
 	return body
 }
+

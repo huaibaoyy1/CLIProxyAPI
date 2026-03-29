@@ -1,4 +1,4 @@
-package executor
+﻿package executor
 
 import (
 	"bufio"
@@ -142,7 +142,7 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	body = enforceCacheControlLimit(body, 4)
 
 	// Normalize TTL values to prevent ordering violations under prompt-caching-scope-2026-01-05.
-	// A 1h-TTL block must not appear after a 5m-TTL block in evaluation order (tools→system→messages).
+	// A 1h-TTL block must not appear after a 5m-TTL block in evaluation order (tools鈫抯ystem鈫抦essages).
 	body = normalizeCacheControlTTL(body)
 
 	// Extract betas from body and convert to header
@@ -186,7 +186,7 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	}
 	recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		// Decompress error responses — pass the Content-Encoding value (may be empty)
+		// Decompress error responses 鈥?pass the Content-Encoding value (may be empty)
 		// and let decodeResponseBody handle both header-declared and magic-byte-detected
 		// compression.  This keeps error-path behaviour consistent with the success path.
 		errBody, decErr := decodeResponseBody(httpResp.Body, httpResp.Header.Get("Content-Encoding"))
@@ -349,7 +349,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	}
 	recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		// Decompress error responses — pass the Content-Encoding value (may be empty)
+		// Decompress error responses 鈥?pass the Content-Encoding value (may be empty)
 		// and let decodeResponseBody handle both header-declared and magic-byte-detected
 		// compression.  This keeps error-path behaviour consistent with the success path.
 		errBody, decErr := decodeResponseBody(httpResp.Body, httpResp.Header.Get("Content-Encoding"))
@@ -391,7 +391,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 			}
 		}()
 
-		// If from == to (Claude → Claude), directly forward the SSE stream without translation
+		// If from == to (Claude 鈫?Claude), directly forward the SSE stream without translation
 		if from == to {
 			scanner := bufio.NewScanner(decodedBody)
 			scanner.Buffer(nil, 52_428_800) // 50MB
@@ -516,7 +516,7 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	}
 	recordAPIResponseMetadata(ctx, e.cfg, resp.StatusCode, resp.Header.Clone())
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// Decompress error responses — pass the Content-Encoding value (may be empty)
+		// Decompress error responses 鈥?pass the Content-Encoding value (may be empty)
 		// and let decodeResponseBody handle both header-declared and magic-byte-detected
 		// compression.  This keeps error-path behaviour consistent with the success path.
 		errBody, decErr := decodeResponseBody(resp.Body, resp.Header.Get("Content-Encoding"))
@@ -593,7 +593,7 @@ func (e *ClaudeExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (
 	auth.Metadata["expired"] = td.Expire
 	auth.Metadata["type"] = "claude"
 	now := time.Now().Format(time.RFC3339)
-	auth.Metadata["last_refresh"] = now
+	auth.Metadata["lastRefresh"] = now
 	return auth, nil
 }
 
@@ -1220,7 +1220,7 @@ func checkSystemInstructionsWithMode(payload []byte, strictMode bool) []byte {
 		system.ForEach(func(_, part gjson.Result) bool {
 			if part.Get("type").String() == "text" {
 				// Add cache_control to user system messages if not present.
-				// Do NOT add ttl — let it inherit the default (5m) to avoid
+				// Do NOT add ttl 鈥?let it inherit the default (5m) to avoid
 				// TTL ordering violations with the prompt-caching-scope-2026-01-05 beta.
 				partJSON := part.Raw
 				if !part.Get("cache_control").Exists() {
@@ -1557,9 +1557,9 @@ func stripMessageCacheControl(messages []any, excess *int) {
 // prompt-caching-scope-2026-01-05 ordering constraint: a 1h-TTL block must not
 // appear after a 5m-TTL block anywhere in the evaluation order.
 //
-// Anthropic evaluates blocks in order: tools → system (index 0..N) → messages.
+// Anthropic evaluates blocks in order: tools 鈫?system (index 0..N) 鈫?messages.
 // Within each section, blocks are evaluated in array order. A 5m (default) block
-// followed by a 1h block at ANY later position is an error — including within
+// followed by a 1h block at ANY later position is an error 鈥?including within
 // the same section (e.g. system[1]=5m then system[3]=1h).
 //
 // Strategy: walk all cache_control blocks in evaluation order. Once a 5m block
@@ -1622,11 +1622,11 @@ func normalizeCacheControlTTL(payload []byte) []byte {
 // enforceCacheControlLimit removes excess cache_control blocks from a payload
 // so the total does not exceed the Anthropic API limit (currently 4).
 //
-// Anthropic evaluates cache breakpoints in order: tools → system → messages.
+// Anthropic evaluates cache breakpoints in order: tools 鈫?system 鈫?messages.
 // The most valuable breakpoints are:
-//  1. Last tool         — caches ALL tool definitions
-//  2. Last system block — caches ALL system content
-//  3. Recent messages   — cache conversation context
+//  1. Last tool         鈥?caches ALL tool definitions
+//  2. Last system block 鈥?caches ALL system content
+//  3. Recent messages   鈥?cache conversation context
 //
 // Removal priority (strip lowest-value first):
 //
@@ -1880,3 +1880,4 @@ func injectSystemCacheControl(payload []byte) []byte {
 
 	return payload
 }
+
