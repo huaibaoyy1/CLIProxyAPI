@@ -1,4 +1,4 @@
-﻿package auth
+package auth
 
 import (
 	"bytes"
@@ -2523,7 +2523,6 @@ func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duratio
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		m.checkRefreshes(ctx)
 		for {
 			select {
 			case <-ctx.Done():
@@ -2895,6 +2894,19 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 	}
 	if updated == nil {
 		updated = cloned
+	}
+	// Preserve lastRefresh when the refresh result does not carry it.
+	// Some refresh flows only update provider token fields and would otherwise
+	// overwrite the auth JSON file, causing lastRefresh to disappear after restart.
+	if auth.Metadata != nil {
+		if _, exists := auth.Metadata["lastRefresh"]; exists {
+			if updated.Metadata == nil {
+				updated.Metadata = make(map[string]any, 1)
+			}
+			if _, exists := updated.Metadata["lastRefresh"]; !exists {
+				updated.Metadata["lastRefresh"] = auth.Metadata["lastRefresh"]
+			}
+		}
 	}
 	// Preserve runtime created by the executor during Refresh.
 	// If executor didn't set one, fall back to the previous runtime.
