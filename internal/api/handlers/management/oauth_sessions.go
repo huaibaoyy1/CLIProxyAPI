@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	oauthSessionTTL     = 10 * time.Minute
-	maxOAuthStateLength = 128
+	oauthSessionTTL                 = 10 * time.Minute
+	oauthPendingSessionCleanupAfter = 3 * time.Minute
+	maxOAuthStateLength             = 128
 )
 
 var (
@@ -132,6 +133,38 @@ func (s *oauthSessionStore) CompleteProvider(provider string) int {
 	return removed
 }
 
+func (s *oauthSessionStore) CompleteProviderPendingOlderThan(provider string, olderThan time.Duration) int {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return 0
+	}
+	if olderThan <= 0 {
+		olderThan = oauthPendingSessionCleanupAfter
+	}
+	now := time.Now()
+	cutoff := now.Add(-olderThan)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.purgeExpiredLocked(now)
+	removed := 0
+	for state, session := range s.sessions {
+		if !strings.EqualFold(session.Provider, provider) {
+			continue
+		}
+		if session.Status != "" {
+			continue
+		}
+		if session.CreatedAt.IsZero() || session.CreatedAt.After(cutoff) {
+			continue
+		}
+		delete(s.sessions, state)
+		removed++
+	}
+	return removed
+}
+
 func (s *oauthSessionStore) Get(state string) (oauthSession, bool) {
 	state = strings.TrimSpace(state)
 	now := time.Now()
@@ -176,6 +209,10 @@ func CompleteOAuthSession(state string) { oauthSessions.Complete(state) }
 
 func CompleteOAuthSessionsByProvider(provider string) int {
 	return oauthSessions.CompleteProvider(provider)
+}
+
+func CleanupStalePendingOAuthSessionsByProvider(provider string) int {
+	return oauthSessions.CompleteProviderPendingOlderThan(provider, oauthPendingSessionCleanupAfter)
 }
 
 func GetOAuthSession(state string) (provider string, status string, ok bool) {

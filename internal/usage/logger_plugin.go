@@ -17,7 +17,7 @@ import (
 
 var statisticsEnabled atomic.Bool
 
-const requestDetailRetentionLimit = 1000
+const requestDetailRetentionWindow = 30 * 24 * time.Hour
 
 func init() {
 	statisticsEnabled.Store(true)
@@ -222,6 +222,8 @@ func (s *RequestStatistics) Record(ctx context.Context, record coreusage.Record)
 	s.requestsByHour[hourKey]++
 	s.tokensByDay[dayKey] += totalTokens
 	s.tokensByHour[hourKey] += totalTokens
+
+	s.enforceRetentionLocked(time.Now())
 }
 
 func (s *RequestStatistics) updateAPIStats(stats *apiStats, model string, detail RequestDetail) {
@@ -260,8 +262,10 @@ func (s *RequestStatistics) Snapshot() StatisticsSnapshot {
 		return result
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.enforceRetentionLocked(time.Now())
 
 	result.TotalRequests = s.totalRequests
 	result.SuccessCount = s.successCount
@@ -385,6 +389,8 @@ func (s *RequestStatistics) MergeSnapshot(snapshot StatisticsSnapshot) MergeResu
 		}
 	}
 
+	s.enforceRetentionLocked(time.Now())
+
 	return result
 }
 
@@ -414,12 +420,91 @@ func (s *RequestStatistics) recordImported(apiName, modelName string, stats *api
 }
 
 func trimRequestDetails(details []RequestDetail) []RequestDetail {
-	if len(details) <= requestDetailRetentionLimit {
+	if len(details) == 0 {
 		return details
 	}
-	trimmed := make([]RequestDetail, requestDetailRetentionLimit)
-	copy(trimmed, details[len(details)-requestDetailRetentionLimit:])
+	trimmed := make([]RequestDetail, len(details))
+	copy(trimmed, details)
 	return trimmed
+}
+
+func (s *RequestStatistics) enforceRetentionLocked(now time.Time) {
+	if s == nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	cutoff := now.Add(-requestDetailRetentionWindow)
+	retained := make(map[string]map[string][]RequestDetail)
+
+	for apiName, stats := range s.apis {
+		if stats == nil {
+			continue
+		}
+		for modelName, modelStatsValue := range stats.Models {
+			if modelStatsValue == nil || len(modelStatsValue.Details) == 0 {
+				continue
+			}
+
+			for _, detail := range modelStatsValue.Details {
+				if detail.Timestamp.IsZero() {
+					continue
+				}
+				if detail.Timestamp.Before(cutoff) || detail.Timestamp.After(now) {
+					continue
+				}
+				models, ok := retained[apiName]
+				if !ok {
+					models = make(map[string][]RequestDetail)
+					retained[apiName] = models
+				}
+				models[modelName] = append(models[modelName], detail)
+			}
+		}
+	}
+
+	s.totalRequests = 0
+	s.successCount = 0
+	s.failureCount = 0
+	s.totalTokens = 0
+	s.apis = make(map[string]*apiStats)
+	s.requestsByDay = make(map[string]int64)
+	s.requestsByHour = make(map[int]int64)
+	s.tokensByDay = make(map[string]int64)
+	s.tokensByHour = make(map[int]int64)
+
+	for apiName, models := range retained {
+		stats := &apiStats{Models: make(map[string]*modelStats)}
+		s.apis[apiName] = stats
+
+		for modelName, details := range models {
+			for _, detail := range details {
+				totalTokens := detail.Tokens.TotalTokens
+				if totalTokens < 0 {
+					totalTokens = 0
+				}
+
+				s.totalRequests++
+				if detail.Failed {
+					s.failureCount++
+				} else {
+					s.successCount++
+				}
+				s.totalTokens += totalTokens
+
+				s.updateAPIStats(stats, modelName, detail)
+
+				dayKey := detail.Timestamp.Format("2006-01-02")
+				hourKey := detail.Timestamp.Hour()
+				s.requestsByDay[dayKey]++
+				s.requestsByHour[hourKey]++
+				s.tokensByDay[dayKey] += totalTokens
+				s.tokensByHour[hourKey] += totalTokens
+			}
+		}
+	}
 }
 
 func dedupKey(apiName, modelName string, detail RequestDetail) string {

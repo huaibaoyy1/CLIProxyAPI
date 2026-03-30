@@ -95,41 +95,103 @@ func TestRequestStatisticsMergeSnapshotDedupIgnoresLatency(t *testing.T) {
 	}
 }
 
-func TestRequestStatisticsRecordTrimsDetailsWithoutAffectingTotals(t *testing.T) {
+func TestRequestStatisticsRecordRetainsOnlyRecent30Days(t *testing.T) {
 	stats := NewRequestStatistics()
+	now := time.Now().UTC()
 
-	for i := 0; i < requestDetailRetentionLimit+25; i++ {
-		stats.Record(context.Background(), coreusage.Record{
-			APIKey:      "test-key",
-			Model:       "gpt-5.4",
-			RequestedAt: time.Date(2026, 3, 20, 12, 0, 0, i, time.UTC),
-			Detail: coreusage.Detail{
-				InputTokens:  1,
-				OutputTokens: 2,
-				TotalTokens:  3,
-			},
-		})
-	}
+	stats.Record(context.Background(), coreusage.Record{
+		APIKey:      "test-key",
+		Model:       "gpt-5.4",
+		RequestedAt: now.Add(-31 * 24 * time.Hour),
+		Detail: coreusage.Detail{
+			InputTokens:  1,
+			OutputTokens: 2,
+			TotalTokens:  3,
+		},
+	})
+
+	stats.Record(context.Background(), coreusage.Record{
+		APIKey:      "test-key",
+		Model:       "gpt-5.4",
+		RequestedAt: now.Add(-7 * 24 * time.Hour),
+		Detail: coreusage.Detail{
+			InputTokens:  4,
+			OutputTokens: 5,
+			TotalTokens:  9,
+		},
+	})
 
 	snapshot := stats.Snapshot()
 	model := snapshot.APIs["test-key"].Models["gpt-5.4"]
 
-	if got, want := len(model.Details), requestDetailRetentionLimit; got != want {
+	if got, want := len(model.Details), 1; got != want {
 		t.Fatalf("details len = %d, want %d", got, want)
 	}
-	if got, want := model.TotalRequests, int64(requestDetailRetentionLimit+25); got != want {
+	if got, want := model.TotalRequests, int64(1); got != want {
 		t.Fatalf("model total_requests = %d, want %d", got, want)
 	}
-	if got, want := model.TotalTokens, int64((requestDetailRetentionLimit+25)*3); got != want {
+	if got, want := model.TotalTokens, int64(9); got != want {
 		t.Fatalf("model total_tokens = %d, want %d", got, want)
 	}
-	if got, want := snapshot.TotalRequests, int64(requestDetailRetentionLimit+25); got != want {
+	if got, want := snapshot.TotalRequests, int64(1); got != want {
 		t.Fatalf("snapshot total_requests = %d, want %d", got, want)
 	}
-	if got, want := snapshot.TotalTokens, int64((requestDetailRetentionLimit+25)*3); got != want {
+	if got, want := snapshot.TotalTokens, int64(9); got != want {
 		t.Fatalf("snapshot total_tokens = %d, want %d", got, want)
 	}
-	if first := model.Details[0].Timestamp.Nanosecond(); first != 25 {
-		t.Fatalf("first retained detail nanosecond = %d, want %d", first, 25)
+	if got := model.Details[0].Timestamp; got.Before(now.Add(-30 * 24 * time.Hour)) {
+		t.Fatalf("retained timestamp = %s, want within last 30 days", got)
+	}
+}
+
+func TestRequestStatisticsSnapshotTrimsExpiredDetails(t *testing.T) {
+	stats := NewRequestStatistics()
+	now := time.Now().UTC()
+
+	stats.Record(context.Background(), coreusage.Record{
+		APIKey:      "test-key",
+		Model:       "gpt-5.4",
+		RequestedAt: now.Add(-29 * 24 * time.Hour),
+		Detail: coreusage.Detail{
+			InputTokens:  2,
+			OutputTokens: 3,
+			TotalTokens:  5,
+		},
+	})
+
+	stats.Record(context.Background(), coreusage.Record{
+		APIKey:      "test-key",
+		Model:       "gpt-5.4",
+		RequestedAt: now.Add(-2 * time.Hour),
+		Detail: coreusage.Detail{
+			InputTokens:  6,
+			OutputTokens: 7,
+			TotalTokens:  13,
+		},
+	})
+
+	snapshot := stats.Snapshot()
+	model := snapshot.APIs["test-key"].Models["gpt-5.4"]
+
+	if got, want := len(model.Details), 2; got != want {
+		t.Fatalf("initial details len = %d, want %d", got, want)
+	}
+
+	stats.mu.Lock()
+	modelStats := stats.apis["test-key"].Models["gpt-5.4"]
+	modelStats.Details[0].Timestamp = now.Add(-31 * 24 * time.Hour)
+	stats.mu.Unlock()
+
+	snapshot = stats.Snapshot()
+	model = snapshot.APIs["test-key"].Models["gpt-5.4"]
+
+	if got, want := len(model.Details), 1; got != want {
+		t.Fatalf("trimmed details len = %d, want %d", got, want)
+	}
+	if got, want := snapshot.TotalRequests, int64(1); got != want {
+		t.Fatalf("snapshot total_requests = %d, want %d", got, want)
+	}
+	if got, want := snapshot.TotalTokens, int64(13); got != want {
+		t.Fatalf("snapshot total_tokens = %d, want %d", got, want)
 	}
 }

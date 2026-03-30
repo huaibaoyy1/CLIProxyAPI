@@ -1595,7 +1595,7 @@ func (h *Handler) RequestAnthropicToken(c *gin.Context) {
 		}
 		fmt.Println("You can now use Claude services through this CLI")
 		CompleteOAuthSession(state)
-		CompleteOAuthSessionsByProvider("anthropic")
+		CleanupStalePendingOAuthSessionsByProvider("anthropic")
 	}()
 
 	c.JSON(200, gin.H{"status": "ok", "url": authURL, "state": state})
@@ -1853,7 +1853,7 @@ func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 		}
 
 		CompleteOAuthSession(state)
-		CompleteOAuthSessionsByProvider("gemini")
+		CleanupStalePendingOAuthSessionsByProvider("gemini")
 		fmt.Printf("You can now use Gemini CLI services through this CLI; token saved to %s\n", savedPath)
 	}()
 
@@ -2000,7 +2000,7 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 		}
 		fmt.Println("You can now use Codex services through this CLI")
 		CompleteOAuthSession(state)
-		CompleteOAuthSessionsByProvider("codex")
+		CleanupStalePendingOAuthSessionsByProvider("codex")
 	}()
 
 	c.JSON(200, gin.H{"status": "ok", "url": authURL, "state": state})
@@ -2160,7 +2160,7 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 		}
 
 		CompleteOAuthSession(state)
-		CompleteOAuthSessionsByProvider("antigravity")
+		CleanupStalePendingOAuthSessionsByProvider("antigravity")
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		if projectID != "" {
 			fmt.Printf("Using GCP project: %s\n", projectID)
@@ -2298,7 +2298,7 @@ func (h *Handler) RequestKimiToken(c *gin.Context) {
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		fmt.Println("You can now use Kimi services through this CLI")
 		CompleteOAuthSession(state)
-		CompleteOAuthSessionsByProvider("kimi")
+		CleanupStalePendingOAuthSessionsByProvider("kimi")
 	}()
 
 	c.JSON(200, gin.H{"status": "ok", "url": authURL, "state": state})
@@ -2412,7 +2412,7 @@ func (h *Handler) RequestIFlowToken(c *gin.Context) {
 		}
 		fmt.Println("You can now use iFlow services through this CLI")
 		CompleteOAuthSession(state)
-		CompleteOAuthSessionsByProvider("iflow")
+		CleanupStalePendingOAuthSessionsByProvider("iflow")
 	}()
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "url": authURL, "state": state})
