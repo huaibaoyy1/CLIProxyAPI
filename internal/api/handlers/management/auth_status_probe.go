@@ -910,6 +910,25 @@ func authStatusProbeAccountID(auth *coreauth.Auth) string {
 	return ""
 }
 
+func syncAuthProbeMetadata(next *coreauth.Auth, now time.Time) {
+	if next == nil {
+		return
+	}
+	if next.Metadata == nil {
+		next.Metadata = make(map[string]any)
+	}
+
+	next.Metadata["lastRefresh"] = now.UTC().Format(time.RFC3339)
+	next.Metadata["status"] = string(next.Status)
+	next.Metadata["unavailable"] = next.Unavailable
+
+	if strings.TrimSpace(next.StatusMessage) == "" {
+		delete(next.Metadata, "status_message")
+	} else {
+		next.Metadata["status_message"] = next.StatusMessage
+	}
+}
+
 func (h *Handler) applyAuthProbeHealthy(
 	ctx context.Context,
 	auth *coreauth.Auth,
@@ -928,10 +947,7 @@ func (h *Handler) applyAuthProbeHealthy(
 	next.Quota = coreauth.QuotaState{}
 	next.LastRefreshedAt = now
 	next.UpdatedAt = now
-	if next.Metadata == nil {
-		next.Metadata = make(map[string]any)
-	}
-	next.Metadata["lastRefresh"] = now.UTC().Format(time.RFC3339)
+	syncAuthProbeMetadata(next, now)
 	if len(quotaOverview) > 0 {
 		next.Metadata["quota_overview"] = quotaOverview
 	} else {
@@ -952,10 +968,8 @@ func (h *Handler) applyAuthProbeUnauthorized(ctx context.Context, auth *coreauth
 	next.NextRetryAfter = now.Add(h.authStatusProbeInterval())
 	next.LastRefreshedAt = now
 	next.UpdatedAt = now
-	if next.Metadata == nil {
-		next.Metadata = make(map[string]any)
-	}
-	next.Metadata["lastRefresh"] = now.UTC().Format(time.RFC3339)
+	delete(next.Metadata, "quota_overview")
+	syncAuthProbeMetadata(next, now)
 	_, _ = h.authManager.Update(ctx, next)
 }
 
@@ -971,10 +985,8 @@ func (h *Handler) applyAuthProbeHTTPError(ctx context.Context, auth *coreauth.Au
 	next.NextRetryAfter = now.Add(30 * time.Minute)
 	next.LastRefreshedAt = now
 	next.UpdatedAt = now
-	if next.Metadata == nil {
-		next.Metadata = make(map[string]any)
-	}
-	next.Metadata["lastRefresh"] = now.UTC().Format(time.RFC3339)
+	delete(next.Metadata, "quota_overview")
+	syncAuthProbeMetadata(next, now)
 	_, _ = h.authManager.Update(ctx, next)
 }
 
@@ -990,10 +1002,8 @@ func (h *Handler) applyAuthProbeFailure(ctx context.Context, auth *coreauth.Auth
 	next.NextRetryAfter = now.Add(30 * time.Minute)
 	next.LastRefreshedAt = now
 	next.UpdatedAt = now
-	if next.Metadata == nil {
-		next.Metadata = make(map[string]any)
-	}
-	next.Metadata["lastRefresh"] = now.UTC().Format(time.RFC3339)
+	delete(next.Metadata, "quota_overview")
+	syncAuthProbeMetadata(next, now)
 	_, _ = h.authManager.Update(ctx, next)
 }
 
