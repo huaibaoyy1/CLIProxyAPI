@@ -502,6 +502,40 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 	if name == "" {
 		name = auth.ID
 	}
+
+	status := auth.Status
+	statusMessage := strings.TrimSpace(auth.StatusMessage)
+	unavailable := auth.Unavailable
+	lastRefresh := auth.LastRefreshedAt
+
+	if auth.Metadata != nil {
+		if status == "" {
+			if rawStatus, ok := auth.Metadata["status"].(string); ok {
+				if trimmed := strings.TrimSpace(rawStatus); trimmed != "" {
+					status = coreauth.Status(trimmed)
+				}
+			}
+		}
+		if statusMessage == "" {
+			if rawStatusMessage, ok := auth.Metadata["status_message"].(string); ok {
+				statusMessage = strings.TrimSpace(rawStatusMessage)
+			}
+		}
+		if !unavailable {
+			switch rawUnavailable := auth.Metadata["unavailable"].(type) {
+			case bool:
+				unavailable = rawUnavailable
+			case string:
+				unavailable = strings.EqualFold(strings.TrimSpace(rawUnavailable), "true")
+			}
+		}
+		if lastRefresh.IsZero() {
+			if parsedLastRefresh, ok := extractLastRefreshTimestamp(auth.Metadata); ok {
+				lastRefresh = parsedLastRefresh
+			}
+		}
+	}
+
 	entry := gin.H{
 		"id":             auth.ID,
 		"auth_index":     auth.Index,
@@ -509,10 +543,10 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 		"type":           strings.TrimSpace(auth.Provider),
 		"provider":       strings.TrimSpace(auth.Provider),
 		"label":          auth.Label,
-		"status":         auth.Status,
-		"status_message": auth.StatusMessage,
+		"status":         status,
+		"status_message": statusMessage,
 		"disabled":       auth.Disabled,
-		"unavailable":    auth.Unavailable,
+		"unavailable":    unavailable,
 		"runtime_only":   runtimeOnly,
 		"source":         "memory",
 		"size":           int64(0),
@@ -535,8 +569,8 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 		entry["modtime"] = auth.UpdatedAt
 		entry["updated_at"] = auth.UpdatedAt
 	}
-	if !auth.LastRefreshedAt.IsZero() {
-		entry["lastRefresh"] = auth.LastRefreshedAt
+	if !lastRefresh.IsZero() {
+		entry["lastRefresh"] = lastRefresh
 	}
 	if !auth.NextRetryAfter.IsZero() {
 		entry["next_retry_after"] = auth.NextRetryAfter
@@ -1131,11 +1165,26 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 	case string:
 		disabled = strings.EqualFold(strings.TrimSpace(rawDisabled), "true")
 	}
+
 	status := coreauth.StatusActive
+	if rawStatus, ok := metadata["status"].(string); ok {
+		if trimmedStatus := strings.TrimSpace(rawStatus); trimmedStatus != "" {
+			status = coreauth.Status(trimmedStatus)
+		}
+	}
 	if disabled {
 		status = coreauth.StatusDisabled
 	}
+
 	statusMessage, _ := metadata["status_message"].(string)
+
+	unavailable := false
+	switch rawUnavailable := metadata["unavailable"].(type) {
+	case bool:
+		unavailable = rawUnavailable
+	case string:
+		unavailable = strings.EqualFold(strings.TrimSpace(rawUnavailable), "true")
+	}
 
 	authID := h.authIDForPath(path)
 	if authID == "" {
@@ -1153,6 +1202,7 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 		Status:        status,
 		StatusMessage: strings.TrimSpace(statusMessage),
 		Disabled:      disabled,
+		Unavailable:   unavailable,
 		Attributes:    attr,
 		Metadata:      metadata,
 		CreatedAt:     time.Now(),

@@ -72,6 +72,7 @@ type authStatusProbeState struct {
 	FailedCount       int                     `json:"failed_count,omitempty"`
 	SkippedCount      int                     `json:"skipped_count,omitempty"`
 	LastError         string                  `json:"last_error,omitempty"`
+	Results           []authStatusProbeResult `json:"results,omitempty"`
 	Summary           *authStatusProbeSummary `json:"summary,omitempty"`
 }
 
@@ -190,6 +191,9 @@ func sanitizePersistedAuthStatusProbeState(state authStatusProbeState) authStatu
 	}
 	if state.LastCompletedAt.IsZero() && !state.CompletedAt.IsZero() {
 		state.LastCompletedAt = state.CompletedAt
+	}
+	if len(state.Results) > 0 {
+		state.Results = append([]authStatusProbeResult(nil), state.Results...)
 	}
 	state.Summary = copyAuthStatusProbeSummary(state.Summary)
 	return state
@@ -377,6 +381,7 @@ func (h *Handler) scheduleAuthStatusProbe(
 		StartedAt:      startedAt,
 		RequestedCount: len(normalizedNames),
 		LastError:      "",
+		Results:        nil,
 		Summary:        nil,
 	}
 	state := h.copyAuthStatusProbeStateLocked()
@@ -455,6 +460,9 @@ func (h *Handler) currentAuthStatusProbeState() authStatusProbeState {
 
 func (h *Handler) copyAuthStatusProbeStateLocked() authStatusProbeState {
 	state := h.authStatusProbeState
+	if len(state.Results) > 0 {
+		state.Results = append([]authStatusProbeResult(nil), state.Results...)
+	}
 	state.Summary = copyAuthStatusProbeSummary(state.Summary)
 	return state
 }
@@ -545,7 +553,7 @@ func (h *Handler) runAuthStatusProbe(
 
 	startedAt := time.Now()
 	candidates := h.authStatusProbeCandidates(names, allowDisabled)
-	results := h.probeAuthStatusBatch(ctx, candidates)
+	results := h.probeAuthStatusBatch(ctx, candidates, h.recordAuthStatusProbeProgress)
 
 	summary := &authStatusProbeSummary{
 		Status:         "ok",
@@ -648,6 +656,7 @@ func shouldProbeAuthStatus(
 func (h *Handler) probeAuthStatusBatch(
 	ctx context.Context,
 	auths []*coreauth.Auth,
+	onProgress func(authStatusProbeResult),
 ) []authStatusProbeResult {
 	if len(auths) == 0 {
 		return []authStatusProbeResult{}
@@ -694,9 +703,47 @@ func (h *Handler) probeAuthStatusBatch(
 	collected := make([]authStatusProbeResult, 0, len(auths))
 	for result := range results {
 		collected = append(collected, result)
+		if onProgress != nil {
+			onProgress(result)
+		}
 	}
 
 	return collected
+}
+
+func (h *Handler) recordAuthStatusProbeProgress(result authStatusProbeResult) {
+	if h == nil {
+		return
+	}
+
+	h.authStatusProbeMu.Lock()
+	defer h.authStatusProbeMu.Unlock()
+
+	if !h.authStatusProbeRunning {
+		return
+	}
+
+	state := h.authStatusProbeState
+	state.Results = append(state.Results, result)
+	state.CheckedCount = len(state.Results)
+
+	switch {
+	case result.Error != "":
+		state.FailedCount++
+	case result.Status == string(coreauth.StatusActive):
+		state.HealthyCount++
+	case result.HTTPStatus == http.StatusUnauthorized:
+		state.WarningCount++
+		state.UnauthorizedCount++
+	case result.Status == "skipped":
+		state.SkippedCount++
+	case result.Status != "":
+		state.WarningCount++
+	default:
+		state.SkippedCount++
+	}
+
+	h.authStatusProbeState = state
 }
 
 func (h *Handler) probeSingleAuthStatus(ctx context.Context, auth *coreauth.Auth) authStatusProbeResult {
