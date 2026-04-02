@@ -541,33 +541,21 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 		"auth_index":     auth.Index,
 		"name":           name,
 		"type":           strings.TrimSpace(auth.Provider),
-		"provider":       strings.TrimSpace(auth.Provider),
-		"label":          auth.Label,
 		"status":         status,
 		"status_message": statusMessage,
 		"disabled":       auth.Disabled,
 		"unavailable":    unavailable,
 		"runtime_only":   runtimeOnly,
-		"source":         "memory",
 		"size":           int64(0),
 	}
 	if email := authEmail(auth); email != "" {
 		entry["email"] = email
-	}
-	if accountType, account := auth.AccountInfo(); accountType != "" || account != "" {
-		if accountType != "" {
-			entry["account_type"] = accountType
-		}
-		if account != "" {
-			entry["account"] = account
-		}
 	}
 	if !auth.CreatedAt.IsZero() {
 		entry["created_at"] = auth.CreatedAt
 	}
 	if !auth.UpdatedAt.IsZero() {
 		entry["modtime"] = auth.UpdatedAt
-		entry["updated_at"] = auth.UpdatedAt
 	}
 	if !lastRefresh.IsZero() {
 		entry["lastRefresh"] = lastRefresh
@@ -581,8 +569,6 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 		}
 	}
 	if path != "" {
-		entry["path"] = path
-		entry["source"] = "file"
 		if info, err := os.Stat(path); err == nil {
 			entry["size"] = info.Size()
 			entry["modtime"] = info.ModTime()
@@ -591,7 +577,6 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 			if !runtimeOnly && (auth.Disabled || auth.Status == coreauth.StatusDisabled || strings.EqualFold(strings.TrimSpace(auth.StatusMessage), "removed via management api")) {
 				return nil
 			}
-			entry["source"] = "memory"
 		} else {
 			log.WithError(err).Warnf("failed to stat auth file %s", path)
 		}

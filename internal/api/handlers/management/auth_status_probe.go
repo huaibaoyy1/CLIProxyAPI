@@ -20,7 +20,7 @@ import (
 const (
 	authStatusProbeDefaultIntervalHours = 8
 	authStatusProbeTimeout              = 45 * time.Second
-	authStatusProbeConcurrency          = 50
+	authStatusProbeConcurrency          = 80
 	authStatusProbeMaxAttempts          = 3
 	authStatusProbeRetryBackoff         = 1500 * time.Millisecond
 	codexUsageProbeURL                  = "https://chatgpt.com/backend-api/wham/usage"
@@ -43,17 +43,16 @@ type authStatusProbeResult struct {
 }
 
 type authStatusProbeSummary struct {
-	Status         string                  `json:"status"`
-	StartedAt      time.Time               `json:"started_at"`
-	CompletedAt    time.Time               `json:"completed_at"`
-	RequestedCount int                     `json:"requested_count"`
-	CheckedCount   int                     `json:"checked_count"`
-	HealthyCount   int                     `json:"healthy_count"`
-	WarningCount   int                     `json:"warning_count"`
-	Unauthorized   int                     `json:"unauthorized_count"`
-	FailedCount    int                     `json:"failed_count"`
-	SkippedCount   int                     `json:"skipped_count"`
-	Results        []authStatusProbeResult `json:"results,omitempty"`
+	Status         string    `json:"status"`
+	StartedAt      time.Time `json:"started_at"`
+	CompletedAt    time.Time `json:"completed_at"`
+	RequestedCount int       `json:"requested_count"`
+	CheckedCount   int       `json:"checked_count"`
+	HealthyCount   int       `json:"healthy_count"`
+	WarningCount   int       `json:"warning_count"`
+	Unauthorized   int       `json:"unauthorized_count"`
+	FailedCount    int       `json:"failed_count"`
+	SkippedCount   int       `json:"skipped_count"`
 }
 
 type authStatusProbeState struct {
@@ -472,9 +471,6 @@ func copyAuthStatusProbeSummary(summary *authStatusProbeSummary) *authStatusProb
 		return nil
 	}
 	cloned := *summary
-	if len(summary.Results) > 0 {
-		cloned.Results = append([]authStatusProbeResult(nil), summary.Results...)
-	}
 	return &cloned
 }
 
@@ -561,7 +557,6 @@ func (h *Handler) runAuthStatusProbe(
 		CompletedAt:    time.Now(),
 		RequestedCount: len(candidates),
 		CheckedCount:   len(results),
-		Results:        results,
 	}
 
 	for _, result := range results {
