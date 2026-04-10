@@ -59,12 +59,14 @@ type RefreshEvaluator interface {
 }
 
 const (
-	refreshCheckInterval  = 5 * time.Second
-	refreshMaxConcurrency = 16
-	refreshPendingBackoff = time.Minute
-	refreshFailureBackoff = 5 * time.Minute
-	quotaBackoffBase      = time.Second
-	quotaBackoffMax       = 30 * time.Minute
+	refreshCheckInterval   = 5 * time.Second
+	refreshMaxConcurrency  = 16
+	refreshPendingBackoff  = time.Minute
+	refreshFailureBackoff  = 5 * time.Minute
+	quotaBackoffBase       = time.Second
+	quotaBackoffMax        = 30 * time.Minute
+	persistDebounceWindow  = 2 * time.Second
+	persistSingleTimeout   = 10 * time.Second
 )
 
 var quotaCooldownDisabled atomic.Bool
@@ -166,6 +168,12 @@ type Manager struct {
 	// Auto refresh state
 	refreshCancel    context.CancelFunc
 	refreshSemaphore chan struct{}
+
+	// Buffered persistence state
+	persistMu      sync.Mutex
+	persistTimer   *time.Timer
+	persistPending map[string]*Auth
+	persistClosed  bool
 }
 
 // NewManager constructs a manager with optional custom selector and hook.
@@ -185,6 +193,7 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		providerOffsets:  make(map[string]int),
 		modelPoolOffsets: make(map[string]int),
 		refreshSemaphore: make(chan struct{}, refreshMaxConcurrency),
+		persistPending:   make(map[string]*Auth),
 	}
 	// atomic.Value requires non-nil initial value.
 	manager.runtimeConfig.Store(&internalconfig.Config{})
@@ -209,11 +218,56 @@ func (m *Manager) syncSchedulerFromSnapshot(auths []*Auth) {
 	m.scheduler.rebuild(auths)
 }
 
+func schedulerAuthSnapshot(auth *Auth) *Auth {
+	if auth == nil {
+		return nil
+	}
+
+	snapshot := *auth
+	snapshot.Storage = nil
+	snapshot.Runtime = nil
+
+	if len(auth.Attributes) > 0 {
+		snapshot.Attributes = make(map[string]string, len(auth.Attributes))
+		for key, value := range auth.Attributes {
+			snapshot.Attributes[key] = value
+		}
+	} else {
+		snapshot.Attributes = nil
+	}
+
+	if len(auth.ModelStates) > 0 {
+		snapshot.ModelStates = make(map[string]*ModelState, len(auth.ModelStates))
+		for key, state := range auth.ModelStates {
+			if state == nil {
+				continue
+			}
+			snapshot.ModelStates[key] = state.Clone()
+		}
+	} else {
+		snapshot.ModelStates = nil
+	}
+
+	if len(auth.Metadata) > 0 {
+		if seq, ok := auth.Metadata[roundRobinSelectionSeqMetadataKey]; ok {
+			snapshot.Metadata = map[string]any{
+				roundRobinSelectionSeqMetadataKey: seq,
+			}
+		} else {
+			snapshot.Metadata = nil
+		}
+	} else {
+		snapshot.Metadata = nil
+	}
+
+	return &snapshot
+}
+
 func (m *Manager) syncScheduler() {
 	if m == nil || m.scheduler == nil {
 		return
 	}
-	snapshot := m.snapshotAuths()
+	snapshot := m.snapshotSchedulerAuths()
 	var maxSeq uint64
 	for _, auth := range snapshot {
 		if auth == nil {
@@ -242,7 +296,7 @@ func (m *Manager) RefreshSchedulerEntry(authID string) {
 		m.mu.RUnlock()
 		return
 	}
-	snapshot := auth.Clone()
+	snapshot := schedulerAuthSnapshot(auth)
 	m.mu.RUnlock()
 	m.scheduler.upsertAuth(snapshot)
 }
@@ -919,7 +973,7 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	m.mu.Unlock()
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	if m.scheduler != nil {
-		m.scheduler.upsertAuth(authClone)
+		m.scheduler.upsertAuth(schedulerAuthSnapshot(authClone))
 	}
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthRegistered(ctx, auth.Clone())
@@ -947,7 +1001,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	m.mu.Unlock()
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	if m.scheduler != nil {
-		m.scheduler.upsertAuth(authClone)
+		m.scheduler.upsertAuth(schedulerAuthSnapshot(authClone))
 	}
 	_ = m.persist(ctx, auth)
 	m.hook.OnAuthUpdated(ctx, auth.Clone())
@@ -993,10 +1047,11 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 	}
 
 	_, maxRetryCredentials, maxWait := m.retrySettings()
+	persistSkippedCtx := WithSkipPersist(ctx)
 
 	var lastErr error
 	for attempt := 0; ; attempt++ {
-		resp, errExec := m.executeMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
+		resp, errExec := m.executeMixedOnce(persistSkippedCtx, normalized, req, opts, maxRetryCredentials)
 		if errExec == nil {
 			return resp, nil
 		}
@@ -1024,10 +1079,11 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 	}
 
 	_, maxRetryCredentials, maxWait := m.retrySettings()
+	persistSkippedCtx := WithSkipPersist(ctx)
 
 	var lastErr error
 	for attempt := 0; ; attempt++ {
-		resp, errExec := m.executeCountMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
+		resp, errExec := m.executeCountMixedOnce(persistSkippedCtx, normalized, req, opts, maxRetryCredentials)
 		if errExec == nil {
 			return resp, nil
 		}
@@ -1055,10 +1111,11 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 	}
 
 	_, maxRetryCredentials, maxWait := m.retrySettings()
+	persistSkippedCtx := WithSkipPersist(ctx)
 
 	var lastErr error
 	for attempt := 0; ; attempt++ {
-		result, errStream := m.executeStreamMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
+		result, errStream := m.executeStreamMixedOnce(persistSkippedCtx, normalized, req, opts, maxRetryCredentials)
 		if errStream == nil {
 			return result, nil
 		}
@@ -1825,12 +1882,16 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 		}
 
-		_ = m.persist(ctx, auth)
+		if result.Success {
+			m.persistDeferred(ctx, auth)
+		} else {
+			_ = m.persist(ctx, auth)
+		}
 		authSnapshot = auth.Clone()
 	}
 	m.mu.Unlock()
 	if m.scheduler != nil && authSnapshot != nil {
-		m.scheduler.upsertAuth(authSnapshot)
+		m.scheduler.upsertAuth(schedulerAuthSnapshot(authSnapshot))
 	}
 
 	if clearModelQuota && result.Model != "" {
@@ -2507,6 +2568,84 @@ func (m *Manager) persist(ctx context.Context, auth *Auth) error {
 	return err
 }
 
+func (m *Manager) persistDeferred(ctx context.Context, auth *Auth) {
+	if m.store == nil || auth == nil {
+		return
+	}
+	if shouldSkipPersist(ctx) {
+		return
+	}
+	if auth.Attributes != nil {
+		if v := strings.ToLower(strings.TrimSpace(auth.Attributes["runtime_only"])); v == "true" {
+			return
+		}
+	}
+	if auth.Metadata == nil {
+		return
+	}
+	m.schedulePersist(auth)
+}
+
+func (m *Manager) schedulePersist(auth *Auth) {
+	if m == nil || auth == nil {
+		return
+	}
+	id := strings.TrimSpace(auth.ID)
+	if id == "" {
+		return
+	}
+
+	snapshot := auth.Clone()
+
+	m.persistMu.Lock()
+	defer m.persistMu.Unlock()
+
+	if m.persistClosed {
+		return
+	}
+	if m.persistPending == nil {
+		m.persistPending = make(map[string]*Auth)
+	}
+	m.persistPending[id] = snapshot
+
+	if m.persistTimer != nil {
+		return
+	}
+
+	m.persistTimer = time.AfterFunc(persistDebounceWindow, func() {
+		m.flushPersistPending()
+	})
+}
+
+func (m *Manager) flushPersistPending() {
+	if m == nil || m.store == nil {
+		return
+	}
+
+	m.persistMu.Lock()
+	pending := m.persistPending
+	if len(pending) == 0 {
+		m.persistTimer = nil
+		m.persistMu.Unlock()
+		return
+	}
+	m.persistPending = make(map[string]*Auth, len(pending))
+	m.persistTimer = nil
+	m.persistMu.Unlock()
+
+	for id, auth := range pending {
+		if auth == nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), persistSingleTimeout)
+		_, err := m.store.Save(ctx, auth)
+		cancel()
+		if err != nil {
+			log.WithError(err).Warnf("failed to persist auth state for %s", id)
+		}
+	}
+}
+
 // StartAutoRefresh launches a background loop that evaluates auth freshness
 // every few seconds and triggers refresh operations when required.
 // Only one loop is kept alive; starting a new one cancels the previous run.
@@ -2518,6 +2657,10 @@ func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duratio
 		m.refreshCancel()
 		m.refreshCancel = nil
 	}
+	m.persistMu.Lock()
+	m.persistClosed = false
+	m.persistMu.Unlock()
+
 	ctx, cancel := context.WithCancel(parent)
 	m.refreshCancel = cancel
 	go func() {
@@ -2540,6 +2683,16 @@ func (m *Manager) StopAutoRefresh() {
 		m.refreshCancel()
 		m.refreshCancel = nil
 	}
+
+	m.persistMu.Lock()
+	if m.persistTimer != nil {
+		m.persistTimer.Stop()
+		m.persistTimer = nil
+	}
+	m.persistClosed = true
+	m.persistMu.Unlock()
+
+	m.flushPersistPending()
 }
 
 func (m *Manager) checkRefreshes(ctx context.Context) {
@@ -2622,9 +2775,19 @@ func (m *Manager) markAuthSelected(ctx context.Context, auth *Auth) {
 		return
 	}
 	if m.scheduler != nil {
-		m.scheduler.upsertAuth(snapshot)
+		m.scheduler.upsertAuth(schedulerAuthSnapshot(snapshot))
 	}
-	_ = m.persist(ctx, snapshot)
+	m.persistDeferred(ctx, snapshot)
+}
+
+func (m *Manager) snapshotSchedulerAuths() []*Auth {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*Auth, 0, len(m.auths))
+	for _, auth := range m.auths {
+		out = append(out, schedulerAuthSnapshot(auth))
+	}
+	return out
 }
 
 func (m *Manager) snapshotAuths() []*Auth {
@@ -2886,7 +3049,7 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 			current.LastError = &Error{Message: err.Error()}
 			m.auths[id] = current
 			if m.scheduler != nil {
-				m.scheduler.upsertAuth(current.Clone())
+				m.scheduler.upsertAuth(schedulerAuthSnapshot(current))
 			}
 		}
 		m.mu.Unlock()

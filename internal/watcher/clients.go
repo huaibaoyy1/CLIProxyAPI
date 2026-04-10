@@ -109,7 +109,7 @@ func (w *Watcher) reloadClients(rescanAuth bool, affectedOAuthProviders []string
 						}
 						if generated := synthesizer.SynthesizeAuthFile(ctx, path, data); len(generated) > 0 {
 							if pathAuths := authSliceToMap(generated); len(pathAuths) > 0 {
-								w.fileAuthsByPath[normalizedPath] = cloneAuthMap(pathAuths)
+								w.fileAuthsByPath[normalizedPath] = pathAuths
 							}
 						}
 					}
@@ -218,7 +218,7 @@ func (w *Watcher) addOrUpdateClient(path string) {
 	generated := synthesizer.SynthesizeAuthFile(sctx, path, data)
 	newByID := authSliceToMap(generated)
 	if len(newByID) > 0 {
-		w.fileAuthsByPath[normalized] = cloneAuthMap(newByID)
+		w.fileAuthsByPath[normalized] = newByID
 	} else {
 		delete(w.fileAuthsByPath, normalized)
 	}

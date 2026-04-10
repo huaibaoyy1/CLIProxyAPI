@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -971,6 +972,47 @@ func syncAuthProbeMetadata(next *coreauth.Auth, now time.Time) {
 	}
 }
 
+func normalizedQuotaOverview(v map[string]any) map[string]any {
+	if len(v) == 0 {
+		return nil
+	}
+	return v
+}
+
+func shouldSkipAuthProbeStateUpdate(
+	current *coreauth.Auth,
+	nextStatus coreauth.Status,
+	nextStatusMessage string,
+	nextUnavailable bool,
+	nextQuotaOverview map[string]any,
+) bool {
+	if current == nil {
+		return false
+	}
+
+	if current.Status != nextStatus {
+		return false
+	}
+	if strings.TrimSpace(current.StatusMessage) != strings.TrimSpace(nextStatusMessage) {
+		return false
+	}
+	if current.Unavailable != nextUnavailable {
+		return false
+	}
+
+	var currentQuotaOverview map[string]any
+	if current.Metadata != nil {
+		if parsed, ok := current.Metadata["quota_overview"].(map[string]any); ok {
+			currentQuotaOverview = parsed
+		}
+	}
+
+	return reflect.DeepEqual(
+		normalizedQuotaOverview(currentQuotaOverview),
+		normalizedQuotaOverview(nextQuotaOverview),
+	)
+}
+
 func (h *Handler) applyAuthProbeHealthy(
 	ctx context.Context,
 	auth *coreauth.Auth,
@@ -979,6 +1021,11 @@ func (h *Handler) applyAuthProbeHealthy(
 	if auth == nil || h == nil || h.authManager == nil {
 		return
 	}
+
+	if shouldSkipAuthProbeStateUpdate(auth, coreauth.StatusActive, "", false, quotaOverview) {
+		return
+	}
+
 	now := time.Now()
 	next := auth.Clone()
 	next.Status = coreauth.StatusActive
@@ -1002,6 +1049,11 @@ func (h *Handler) applyAuthProbeUnauthorized(ctx context.Context, auth *coreauth
 	if auth == nil || h == nil || h.authManager == nil {
 		return
 	}
+
+	if shouldSkipAuthProbeStateUpdate(auth, coreauth.StatusError, "unauthorized", true, nil) {
+		return
+	}
+
 	now := time.Now()
 	next := auth.Clone()
 	next.Status = coreauth.StatusError
@@ -1019,10 +1071,16 @@ func (h *Handler) applyAuthProbeHTTPError(ctx context.Context, auth *coreauth.Au
 	if auth == nil || h == nil || h.authManager == nil {
 		return
 	}
+
+	nextStatusMessage := fmt.Sprintf("probe_http_%d", statusCode)
+	if shouldSkipAuthProbeStateUpdate(auth, coreauth.StatusError, nextStatusMessage, true, nil) {
+		return
+	}
+
 	now := time.Now()
 	next := auth.Clone()
 	next.Status = coreauth.StatusError
-	next.StatusMessage = fmt.Sprintf("probe_http_%d", statusCode)
+	next.StatusMessage = nextStatusMessage
 	next.Unavailable = true
 	next.NextRetryAfter = now.Add(30 * time.Minute)
 	next.LastRefreshedAt = now
@@ -1036,6 +1094,11 @@ func (h *Handler) applyAuthProbeFailure(ctx context.Context, auth *coreauth.Auth
 	if auth == nil || h == nil || h.authManager == nil {
 		return
 	}
+
+	if shouldSkipAuthProbeStateUpdate(auth, coreauth.StatusError, message, true, nil) {
+		return
+	}
+
 	now := time.Now()
 	next := auth.Clone()
 	next.Status = coreauth.StatusError

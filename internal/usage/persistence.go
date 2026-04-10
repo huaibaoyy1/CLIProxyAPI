@@ -3,6 +3,7 @@ package usage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -13,7 +14,6 @@ import (
 )
 
 const (
-	usagePersistDebounce = 2 * time.Second
 	usagePersistInterval = 30 * time.Second
 	usagePersistTimeout  = 10 * time.Second
 )
@@ -26,11 +26,13 @@ type usageSnapshotStore interface {
 type snapshotPersistenceController struct {
 	store usageSnapshotStore
 
-	mu      sync.Mutex
-	timer   *time.Timer
-	closed  bool
-	stopCh  chan struct{}
-	started sync.Once
+	mu               sync.Mutex
+	closed           bool
+	stopCh           chan struct{}
+	started          sync.Once
+	dirty            bool
+	lastPersistHash  [32]byte
+	hasPersistedHash bool
 }
 
 type persistencePlugin struct {
@@ -192,13 +194,7 @@ func (c *snapshotPersistenceController) SchedulePersist() {
 		return
 	}
 
-	if c.timer != nil {
-		c.timer.Stop()
-	}
-
-	c.timer = time.AfterFunc(usagePersistDebounce, func() {
-		c.persistNow()
-	})
+	c.dirty = true
 }
 
 func (c *snapshotPersistenceController) runPeriodicPersist() {
@@ -224,9 +220,44 @@ func (c *snapshotPersistenceController) persistNow() {
 		return
 	}
 
-	if err := persistSnapshot(c.store, GetRequestStatistics().Snapshot()); err != nil {
-		log.WithError(err).Warn("failed to persist usage statistics snapshot")
+	c.mu.Lock()
+	dirty := c.dirty
+	c.mu.Unlock()
+	if !dirty {
+		return
 	}
+
+	snapshot := GetRequestStatistics().Snapshot()
+	raw, errMarshal := json.Marshal(snapshot)
+	if errMarshal != nil {
+		log.WithError(errMarshal).Warn("failed to marshal usage statistics snapshot")
+		return
+	}
+
+	sum := sha256.Sum256(raw)
+
+	c.mu.Lock()
+	alreadyPersisted := c.hasPersistedHash && c.lastPersistHash == sum
+	c.mu.Unlock()
+	if alreadyPersisted {
+		c.mu.Lock()
+		c.dirty = false
+		c.mu.Unlock()
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), usagePersistTimeout)
+	defer cancel()
+	if errPersist := c.store.PersistUsageSnapshot(ctx, raw); errPersist != nil {
+		log.WithError(errPersist).Warn("failed to persist usage statistics snapshot")
+		return
+	}
+
+	c.mu.Lock()
+	c.lastPersistHash = sum
+	c.hasPersistedHash = true
+	c.dirty = false
+	c.mu.Unlock()
 }
 
 func (c *snapshotPersistenceController) Close() {
@@ -240,10 +271,6 @@ func (c *snapshotPersistenceController) Close() {
 		return
 	}
 	c.closed = true
-	if c.timer != nil {
-		c.timer.Stop()
-		c.timer = nil
-	}
 	stopCh := c.stopCh
 	c.mu.Unlock()
 
